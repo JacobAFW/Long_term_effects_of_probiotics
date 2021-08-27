@@ -7,7 +7,7 @@ date: "Last updated on `r Sys.Date()`"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/SCN_vs_NICU_probiotic_study')
+knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/Long_term_effects_of_probiotics')
 load(file = "Rmd.RData")
 ```
 
@@ -17,7 +17,7 @@ To examine the effect of probiotic-treatment on Shannon diversity, a generalised
 
 After creation of the initial model with [lme4](https://cran.r-project.org/web/packages/lme4/vignettes/lmer.pdf), backwards selection was used to find the least complex, yet adequate, model by comparing Akaike’s Information Criterion (AIC) scores and removing predictors that did not contribute to variation in the model. A post-hoc pairwise Tukey comparison (correcting for multiple comparisons) was used to assess the effect of probiotic-treatment on alpha diveristy using the emmeans package. 
 
-The code to create the data objects used in this workflow can be found in the ['Pipeline.Rmd'](https://github.com/JacobAFW/SCN_vs_NICU_probiotic_study).
+The code to create the data objects used in this workflow can be found in the ['Pipeline.Rmd'](https://github.com/JacobAFW/Long_term_effects_of_probiotics).
 
 ## Packages
 

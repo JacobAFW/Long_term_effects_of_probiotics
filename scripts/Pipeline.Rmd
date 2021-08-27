@@ -7,14 +7,14 @@ date: "Last updated on `r Sys.Date()`"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/SCN_vs_NICU_probiotic_study')
+knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/Long_term_effects_of_probiotics')
 load(file = "Rmd.RData")
 ```
 
 
 # About.
 
-This document contains a pipeline to go from raw Illumina MiSeq reads to a phyloseq object (along with some exploratory analysis) and is based on the workflow from the paper [Characterising the bacterial gut microbiome of probiotic-supplmented very-preterm infants](https://github.com/JacobAFW/NICU_Microbiome_Study/blob/main/Complete_Workflow_NICU_Microbiome.pdf), which was based largely around this [DADA2](https://pubmed.ncbi.nlm.nih.gov/27508062/) workflow developed by *Callahan, et al.*. 
+This document contains a pipeline to go from raw Illumina MiSeq reads to a phyloseq object (along with some additional exploratory analysis) and is based on the workflow from the paper [The bacterial gut microbiome of probiotic-treated very-preterm infants – Changes from admission to discharge](https://github.com/JacobAFW/NICU_Microbiome_Study/), which was based largely around this [DADA2](https://pubmed.ncbi.nlm.nih.gov/27508062/) workflow developed by *Callahan, et al.*. 
 
 
 ## Load required packages.
@@ -277,7 +277,8 @@ seqtab.combined <- read_csv("Data/seqtab_original.csv") %>%
  - With optional species addition (there is an agglomeration step downstream, so you can add species now for curiosities sake, and remove later for analysis).
  
 ```{r, warning=F, message=F,eval=F}
-taxa <- assignTaxonomy(seqtab.microdecon, "Data/silva_nr_v132_train_set.fa.gz")
+taxa <- assignTaxonomy(seqtab.microdecon,
+        "~/Desktop/Jacob_Uni/Data/SCN_vs_NICU_probiotic_study/Data/silva_nr_v132_train_set.fa.gz")
 
 taxa.print <- taxa # Removes sequence rownames for display only
 rownames(taxa.print) <- NULL

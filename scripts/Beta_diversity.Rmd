@@ -7,13 +7,13 @@ date: "Last updated on `r Sys.Date()`"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/SCN_vs_NICU_probiotic_study')
+knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/Long_term_effects_of_probiotics')
 load(file = "Rmd.RData")
 ```
 
 # About
 
-EnvFit analysis (Vegan package) was used to explore the effect of covariates on microbial community composition between groups (beta diversity), to determine if probiotic treatment has an effect. The EnvFit function was applied to an ordination using NMDS that was based on a Bray-Curtis dissimilarity matrix calculated from data normalised with Total Sum Scaling. The significance was based on 10,000 permutations and was transformed based on the Benjamini-Hochberg (BH) procedure.
+EnvFit analysis (Vegan package) was used to explore the effect of covariates on microbial community composition between groups (beta diversity), to determine if probiotic treatment has a long lasting effect. The EnvFit function was applied to an ordination using NMDS that was based on a Bray-Curtis dissimilarity matrix calculated from data normalised with Total Sum Scaling. The significance was based on 10,000 permutations and was transformed based on the Benjamini-Hochberg (BH) procedure.
 
 # Load packages
 
@@ -69,7 +69,6 @@ set.seed(1)
 
 envfit_object <- envfit(ordination_distance, envdat.phy, permutations = 10000) 
 ``` 
-
 
 # Adjust p values
 
