@@ -1,1 +1,5 @@
 # Long_term_effects_of_probiotics
+
+Microbiome analyses and supplementary data for a pliot study exploring if differences observed in probiotic-treated and non-treated infants at discharge persist beyond the first year of life.The main objective of this work was to determine if the effectiveness of the protocol. Firstly, if staudy participants (their parents) would be willing to partake in at home recruitment and collection. In addition, as the collection had to be done at home and mailed into the laboratory, we also made a comparison between storage at -80 and with our chosen collection kit, which suspends the sample in DNA-stabilising buffer. Lastly, although the main objective of this pilot was to determine if this protocol would be effective, we also made comparisons on a small dataset for treated and non-treated infants, whilst accounting for a few additional covariates (the number of covariates incldued in the modelling was limited by the small sample size).
+
+The manuscript is yet to be published, but a link will be added **HERE** when it is.
