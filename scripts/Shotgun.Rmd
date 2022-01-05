@@ -1,0 +1,236 @@
+---
+title: "Shotgun Analysis"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/Long_term_effects_of_probiotics')
+```
+
+# Exploratory analysis with shotgun metagenomics data
+
+Sequencing and pre-analytical bioinformatics performed by Microba
+
+## About.
+
+
+## Load required packages. 
+
+```{r, warning=F, message=F, results='hide'}
+sapply(c("caret", "pls", "e1071", "ggplot2", 
+    "randomForest", "tidyverse", "ggrepel", "nlme", "devtools", 
+    "reshape2", "PMA", "structSSI", "ade4","ggnetwork", 
+    "intergraph", "scales", "readxl", "genefilter", "impute", 
+    "phyloseq", "phangorn", "dada2", "DECIPHER", "gridExtra", "stringi", "janitor"), 
+    require, character.only = TRUE)
+```
+
+## Import taxonomy
+
+```{r, warning=F, message=F, eval=F}
+shotgun_taxa <- read_tsv("data/shotgun/profiles.tsv") %>% 
+  select(1:2)
+```
+
+## Import taxonomy
+
+```{r, warning=F, message=F, eval=F}
+
+```
+
+## Import metadata
+
+```{r, warning=F, message=F, eval=F}
+Metadata <- readxl::read_excel("data/metadata/Metadata.xlsx") %>% 
+  filter(ID != "NO SAMPLE", Study != "BLANK") %>% 
+  mutate(row_names = ID) %>% 
+  column_to_rownames("row_names") %>% 
+  arrange(URN) %>% 
+  mutate_if(is.character, as.factor) %>% 
+  mutate(Sample_Type = ifelse(OMNIgene_Number == "Original", "Original", "OMNIgene"))
+```
+
+## Constrcut the Phyloseq object.
+ - Includes: metadata, ASV table, taxonomy table and phylogenetic tree.
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+ps <- phyloseq(otu_table(seqtab.microdecon, taxa_are_rows=FALSE), 
+               sample_data(Metadata), 
+               tax_table(taxa2))
+```
+
+
+## Getting read counts
+```{r, eval=F}
+sample_data(ps) %>% 
+  unclass() %>% 
+  as.data.frame() %>% 
+  mutate(TotalReads = sample_sums(ps)) %>% 
+  ggplot(aes(TotalReads)) + 
+    geom_histogram() + 
+    ggtitle("Sequencing Depth")
+```
+
+## Filtering and normalisation.
+
+### Taxonomy filtering.
+ - Can check the number of phyla before and after transformation with `table(tax_table(ps)[, "Phylum"], exclude = NULL)`.
+ - Remove features with ambiguous and NA phylum annotation.
+
+```{r, warning=F, message=F, results='hide', eval=F}
+ps1 <- subset_taxa(ps, !is.na(Phylum) & !Phylum %in% c("", "uncharacterized"))
+```
+
+### Remove problematic samples
+ - samples that produce NA values during transformations downstream in the otu_table (for some reason it won't allow all within the same function, hence the pipe)
+ 
+```{r, warning=F, message=F, eval=F}
+#ps1 <- subset_samples(ps1, ID != "219") %>%  
+ # subset_samples(ID != "141") %>% 
+ # subset_samples(ID != "118")
+```
+
+#### Check percentages of NA values left.
+```{r,warning=F,message=F}
+# Total
+sum(is.na(tax_table(ps1)))/prod(dim(tax_table(ps1))) * 100
+```
+
+```{r,warning=F,message=F}
+# Per taxonomic rank
+apply(tax_table(ps1), 2, function(col)sum(is.na(col))/length(col)) * 100
+```
+
+### Filtering.
+ - Using an unsupervised method (relying on the data in this experiment) explore the prevelance of features in the dataset.
+ - Calculate the prevalence of each feature and store as a dataframe.
+ - Add taxonomy and total read counts.
+ - Compare prevelance and abundance filtering before deciding on the optimal method.
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+prevdf = apply(X = otu_table(ps1),
+               MARGIN = ifelse(taxa_are_rows(ps1), yes = 1, no = 2),
+               FUN = function(x){sum(x > 0)})
+
+prevdf = data.frame(Prevalence = prevdf,
+                    TotalAbundance = taxa_sums(ps1),
+                    tax_table(ps1))
+```
+
+ - Plot the relationship between prevelance and total read count for each feature. This provides information on outliers and ranges of features.
+ 
+```{r, warning=F, message=F, fig.cap="Scatterplot exploring the relationship between prevelance and abundance of phyla."}
+prevdf %>%
+  subset(Phylum %in% get_taxa_unique(ps1, "Phylum")) %>%
+  ggplot(aes(TotalAbundance, Prevalence / nsamples(ps1),color=Phylum)) +
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 1) +  
+  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  
+  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme(legend.position="none")
+```
+
+ - Define prevalence threshold based on the plot and apply to ps object (if prevelance is too low don't designate a threshold).
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+prevalenceThreshold = 0.01 * nsamples(ps1)
+
+keepTaxa = rownames(prevdf)[(prevdf$Prevalence >= prevalenceThreshold)]
+
+ps2 = prune_taxa(keepTaxa, ps1)
+
+as.data.frame(keepTaxa) %>%  nrow()
+```
+ 
+ - Define abundance threshold
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+prevalenceThreshold = prevdf %>% 
+  summarise(sum(TotalAbundance)*.00001) %>% 
+  pull(1)
+
+keepTaxa = prevdf %>% 
+  filter(TotalAbundance >= prevalenceThreshold) %>% 
+  rownames()
+
+ps2 = prune_taxa(keepTaxa, ps1)
+
+as.data.frame(keepTaxa) %>%  nrow()
+```
+
+**Used abundance threshold.**
+
+ - Explore the relationship on the filtered data set.
+```{r, warning=F, message=F, fig.cap="Scatterplot exploring the relationship between prevelance and abundance of phyla on data passed through a prevalence threshold."}
+prevdf %>%
+  subset(Phylum %in% get_taxa_unique(ps2, "Phylum")) %>%
+  ggplot(aes(TotalAbundance, Prevalence / nsamples(ps2),color=Phylum)) +
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 1) +  
+  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  
+  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme(legend.position="none")
+```
+
+#### Check percentages of NA values left.
+```{r,warning=F,message=F}
+# Per taxonomic rank
+apply(tax_table(ps2), 2, function(col)sum(is.na(col))/length(col)) * 100
+```
+
+### Aggolmerate taxa.
+ - Combine features that descend from the same genus as most species have not been identified due to the poor taxonomic depth in 16S, a result of the length of the fragment amplified from the 16SrRNA gene.  
+ - Can check how many genera would be present after filtering by running `length(get_taxa_unique(ps2, taxonomic.rank = "Genus"))` and/or `ntaxa(ps3)` will give the number of post agglomeration taxa.
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+ps3 = tax_glom(ps2, "Genus", NArm = FALSE) 
+```
+
+#### Check percentages of NA values left.
+```{r,warning=F,message=F}
+# Per taxonomic rank
+apply(tax_table(ps3), 2, function(col)sum(is.na(col))/length(col)) * 100 
+```
+
+### Normalisation.
+ - Plot a refraction curve to see if total sum scaling will surfice.
+ - Define colours and lines.
+ - Step = step size for sample sizes in rarefaction curve.
+ 
+```{r, warning=F, message=F, eval=F}
+vegan::rarecurve(t(otu_table(ps3)), step = 20, label = FALSE, main = "Rarefaction Curve", 
+        col = c("black", "darkred", "forestgreen", "orange", "blue", "yellow", "hotpink"))
+```
+
+ - Perform total sum scaling on agglomerated dataset.
+ 
+```{r, warning=F, message=F, eval=F}
+ps4 <- transform_sample_counts(ps3, function(x) x / sum(x))
+```
+
+ - Explore normalisation with violin plots.
+ - Compares differences in scale and distribution of the abundance values before and after transformation.
+ - Using arbitrary subset, based on Phylum = Firmicutes, for plotting (ie. can explore any taxa to observe transformation).
+
+```{r, warning=F, message=F, fig.cap="Violin plots exploring of distribution of abundance in Firmicutes before and after normalisation of data."}
+plot_abundance = function(physeq, Title = "Abundance", 
+                          Facet = "Order", Color = "Phylum", variable = "Study"){
+  
+    subset_taxa(physeq, Phylum %in% c("Firmicutes")) %>%
+    psmelt() %>%
+    subset(Abundance > 0) %>%
+    ggplot(mapping = aes_string(x = variable, y = "Abundance", color = Color, fill = Color)) +
+      geom_violin(fill = NA) +
+      geom_point(size = 1, alpha = 0.3, position = position_jitter(width = 0.3)) +
+      facet_wrap(facets = Facet) + 
+      scale_y_log10()+
+      theme(legend.position="none") +
+      labs(title = Title)
+}
+
+grid.arrange(nrow = 2, (plot_abundance(ps3, Title = "Abundance", 
+                          Color = "Study", variable = "Study")),
+                        plot_abundance(ps4, Title = "Relative Abundance", 
+                          Color = "Study", variable = "Study"))
+```

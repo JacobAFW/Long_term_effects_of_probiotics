@@ -1,5 +1,5 @@
 ---
-title: "envfit_analysis"
+title: "Samplt Storage Comparison"
 output: pdf_document
 author: "Jacob Westaway"
 date: "Last updated on `r Sys.Date()`"
@@ -8,32 +8,55 @@ date: "Last updated on `r Sys.Date()`"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/Long_term_effects_of_probiotics')
-load(file = "Rmd.RData")
 ```
 
-# About
+# Data exploration and univariate analysis.
 
-Ordinations and EnvFit analysis (Vegan package) were used to determine if storage of faecal samples with the OMNIGene collection kit differed from the gold standard freezing at -80. The EnvFit function was applied to an ordination using NMDS that was based on a Bray-Curtis dissimilarity matrix calculated from data normalised with Total Sum Scaling. The significance was based on 10,000 permutations and was transformed based on the Benjamini-Hochberg (BH) procedure.
 
-# Load packages
+## About
+
+This script explores the differences and similarities between sample storage types, and uses ordinations and EnvFit/PERMANOVA analysis (Vegan package) to determine if storage of faecal samples with the OMNIGene collection kit differed from the gold standard freezing at -80. The EnvFit function was applied to an ordination using NMDS that was based on a Bray-Curtis dissimilarity matrix calculated from data normalised with Total Sum Scaling, and the PERMANOVA to an ordination using PCoA that was also based on Bray-Curtis. The significance of both was based on 10,000 permutations and was transformed based on the Benjamini-Hochberg (BH) procedure.
+
+## Load required packages. 
 
 ```{r, warning=F, message=F, results='hide'}
-sapply(c("DESeq2", "phyloseq", "dplyr", "ggplot2", "grid", 
-         "gridExtra", "ggpubr", "sjPlot", "pheatmap", "tidyverse", "vegan"), 
-          require, character.only = TRUE)
+sapply(c("BiocManager", "ggplot2", "ggforce", "vegan", "knitr", "dplyr", 
+         "phyloseq", "phyloseqGraphTest", "igraph", "ggnetwork", "nlme", 
+         "reshape2", "tidyverse", "plyr", "DESeq2", "sjPlot", "ggpubr", 
+         "gridExtra", "grid", "gtable", "lazyeval", "phyloseq", "tidyverse", 
+         "knitr", "lme4", "emmeans", "MuMIn", "aods3", "sjPlot", "car"), 
+       require, character.only = TRUE)
 ```
 
-# Subset to storage comparison samples
+## Subset data to sample storage comparison
 
-```{r,warning=F,message=F}
-ps.storage_test <- ps2.TSS %>% 
-  subset_samples(Storage_test == "Yes")
+```{r, warning=F, message=F}
+ps2_storage <- subset_samples(ps2, Study == "2") %>% 
+  subset_samples(URN != "957652") %>% 
+  subset_samples(URN != "648892")
+ps3_storage <- subset_samples(ps3, Study == "2") %>% 
+  subset_samples(URN != "957652") %>% 
+  subset_samples(URN != "648892")
+ps4_storage <- subset_samples(ps4, Study == "2") %>% 
+  subset_samples(URN != "957652") %>% 
+  subset_samples(URN != "648892")
 ```
 
-# Explore clustering of variables with PCoA and Bray-Curtis
+## Beta diversity
+ - Use distance and ordination methods to explore the relationship between metadata.
+ - We calculate the distances using pruned, transformed (TSS) and non-agglomerated data.
 
-```{r, fig.cap="PCoA plot of Bray-Curtis distances coloured by probiotic group.", warning=F, message=F}
-# define function
+```{r, warning=F, message=F, eval=F}
+ps2_storage <- ps2_storage %>%
+        transform_sample_counts(function(x) x / sum(x))
+```
+ 
+ - We can then create distance matrices and plots for this data subset using several methods:
+ - e.g. bray-curtis or weighted unifrac distances with PCoA, NMDS, etc.
+ - Define a function that ordindates the previously transformed data, extarcts the eigenvalues, and creates a dissimilarity plot.
+ - Extract eigenvalues from ordination.
+
+```{r, fig.cap="PCoA plot of Bray-Curtis distances coloured by date.", warning=F, message=F}
 ordination_plots <- function(filtered_ps, variable, vis_method, dist_method){
 # ordinate
 ps_ordination <- ordinate(filtered_ps, method = vis_method, distance = dist_method)
@@ -44,33 +67,85 @@ plot_ordination(filtered_ps, ps_ordination, color = variable,
   title = "PCoA (Bray-Curtis)") +
   labs(col = variable) +
   coord_fixed(sqrt(evals[2] / evals[1])) +
-  geom_point(size = 3) +
-  stat_ellipse(typre = "norm", linetype = 2) +
-  scale_color_hue(labels = c("OMNIGene", "Frozen"))
+  geom_point(aes(label = ID), size = 5, alpha = 0.5) +
+  geom_text(aes(label = ifelse(ID == 319, as.character(Sample_Type), '')), hjust = 0, vjust = 2) +
+  scale_colour_viridis_d()
  }
 
-ordination_plots(ps.storage_test, "Storage", "OMNIGene", "Frozen")
+ordination_plots(ps2_storage, "URN", "PCoA", "bray")
+
+#ggsave("outputs/PCoA.png", dpi = 600, height = 5, width = 7)
 ```
 
-# envfit analyis 
+**319 = OMNIgene sample, not original sample. However, it does have the greatest read depth of the samples within this URN. Thus, I hypothesise that the greater read depth means that more diversity was captured by this particular sample, and that although we have filtered out those taxa not frequently observed and normalised the data with TSS, these methods (no methods) are perfect. For instance, sample 319 may have some taxa that are in low abundance within the context of URN 648890, but are still widely distributed throughout the other URNs, and thus are not removed and can still contribute to a greater distance to its technical replicates.**
+
+
+### Statistical test: PERMANOVA.
+ - ps2 transformed.
+ - Preforming permutational anova for group-level differences based on dissimilarity.
+ - Extract otu table and metadata from phyloseq object.
+ - Use `adonis()` from the *vegan* package to perform the PERMANOVA.
+ - Homogeneity Condition
+  - Significant PERMANOVA means one of three things:
+  - there is a difference in the location of the samples (i.e. the average community composition).
+  - there is a difference in the dispersion of the samples (i.e. the variability in the community composition).
+  - there is a difference in both the location and the dispersion.
+  - If you get a significant PERMANOVA you'll want to distinguish between the three options by checking the homogeneity condition using `permdisp()`. If you get a non-significant result the first option above is correct.
+  - `betadisper()` gives a measure of the dispersion within groups. Thus, if the PERMANOVA test is significant and the permdisp is not, the significant result in your communities is due to a mean shift in community composition and not from increased variance within groups.
+  
+#### Mixed effects comparison with technical replicates nested within individuals
+
+#### Mixed effects comparison of storage conditions and URN as main effects
+
+```{r, warning=F, message=F}
+# permanova
+ps_otu <- data.frame(otu_table(ps2_storage))
+ps_metadata <- data.frame(sample_data(ps2_storage))
+permanova <- adonis2(ps_otu ~Sample_Type + URN, data = ps_metadata, method = "bray", by = "margin") # adnois 2
+permanova 
+```
+
+##### Export
+```{r, warning=F, message=F, eval=F}
+permanova_func <- function(ps2_storage){
+  
+# permanova
+ps_otu <- data.frame(otu_table(ps2_storage))
+ps_metadata <- data.frame(sample_data(ps2_storage))
+permanova <- adonis2(ps_otu ~Sample_Type + URN, data = ps_metadata, method = "bray", by = "margin") # adnois 2
+permanova <- tableGrob(as.data.frame(permanova)) %>% 
+  annotate_figure(fig.lab = "PERMANOVA", fig.lab.face = "bold", fig.lab.size = 15)
+
+# homogeneity condition
+dist <- vegdist(ps_otu)
+homogeneity <- as.data.frame(anova(betadisper(dist, ps_metadata$URN))) %>% 
+  tableGrob() %>% 
+  annotate_figure(fig.lab = "Homogeneity Condition", fig.lab.face = "bold", fig.lab.size = 15)
+
+# combine ouputs in a grid
+grid.arrange(permanova, homogeneity, ncol = 1)
+
+}
+
+permanova_func(ps2_storage)
+
+rm()
+```
+
+#### Mixed effects comparison with technical replicates nested within individuals using envfit
 
 ```{r,warning=F,message=F,eval=F}
 ordination_distance <- ordinate(
-    physeq = ps2.TSS, 
+    physeq = ps2_storage, 
     method = "NMDS",
     distance = "bray",
-    formula = ~ Primary_Group + Feeding_Type + NEC + Sepsis + Mode_of_Delivery + 
-      Neonatal_Antibiotics + Chorioamnionitis + Preeclampsia + ROP + Batch + 
-      Gestational_Age_at_Birth + Diabetes + Antenatal_Antibiotics)
+    formula = ~ Sample_Type + URN)
 
-envdat.phy <- ps2.TSS %>% 
+envdat.phy <- ps2_storage %>% 
   sample_data() %>%
   unclass() %>% 
   as.data.frame() %>% 
-  select(Primary_Group, Feeding_Type, NEC, Sepsis, Mode_of_Delivery, 
-         Neonatal_Antibiotics, Chorioamnionitis, Preeclampsia, ROP, Batch, 
-         Gestational_Age_at_Birth, Diabetes, Antenatal_Antibiotics) %>% 
-  centre_and_scale()
+  select(URN, Sample_Type) 
 
 set.seed(1)
 
@@ -102,84 +177,321 @@ envfit(ordination_distance, envdat.phy, permutations = 10000) %>%
 # Plot model
 
 ```{r,warning=F,message=F}
-envfit_object$vectors$r %>% 
-  as.data.frame() %>% 
-  rownames_to_column("Variable") %>%  
-  rename("r2" = ".") %>%  
-  left_join(
-    (envfit_object$vectors$pvals %>% 
-  as.data.frame() %>% 
-  add_column(Variable = "Gestational_Age_at_Birth") %>% 
-  rename("p" = "."))) %>% 
-  rbind(
 envfit_object$factors$r %>% 
   as.data.frame() %>% 
   rownames_to_column("Variable") %>%  
-  rename("r2" = ".") %>% 
-  rows_update(., tibble(Variable = "Sepsis", r2 = 0.1)) %>% # changed to 0.1 for plot 
+  dplyr::rename("r2" = ".") %>%  # changed to 0.1 for plot 
   left_join(
     envfit_object$factors$pvals %>% 
   as.data.frame() %>% 
   rownames_to_column("Variable") %>%  
-  rename("p" = "."))
+  dplyr::rename("p" = ".")
   ) %>% 
   ggplot(aes(x = r2, y = Variable, fill = p)) +
   geom_col() +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 10), limits = c(0, 0.1)) +
+  geom_point(size = 5) +
   theme(axis.line =  element_line(size = .5), panel.background = element_blank()) + 
   scale_fill_continuous(type = "viridis") +
-  scale_y_discrete(labels = c("Primary_Group" = "Probiotic group",
-                              "Neonatal_Antibiotics" = "Neonatal antibiotics",
-                              "Mode_of_Delivery" = "Mode of delivery",
-                              "Feeding_Type" = "Diet",
-                              "Birth_Weight" = "Birthweight",
-                              "Gestational_Age_at_Birth" = "Gestation at birth",
-                              "Antenatal_Antibiotics" = "Antenatal antibiotics"))
+  scale_y_discrete(labels = c("Sample_Type" = "Storage")) +
+  ylab("Covariates")
 ```
 
-# Calculate major contributors (based on adonis)
+#### EXport plots
 
-```{r, warning=F, message=F}
-major_contributors <- function(ps2.TSS, variable){
-# perform permanova  
-ps_otu <- data.frame(otu_table(ps2.TSS))
-ps_metadata <- data.frame(sample_data(ps2.TSS))
-permanova <- adonis(ps_otu ~Primary_Group + Feeding_Type + NEC + Sepsis + 
-                    Mode_of_Delivery + Neonatal_Antibiotics + Chorioamnionitis +
-                    Preeclampsia + ROP + Batch + Gestational_Age_at_Birth + Diabetes + 
-                    Antenatal_Antibiotics, data = ps_metadata, method = "bray")  
-
-# coefficients
-coef <- coefficients(permanova)[paste0(variable, "1"),]
-top.coef <- coef[rev(order(abs(coef)))[1:20]]
-
-genus_contributors <- tax_table(ps2.TSS) %>% 
-    unclass() %>% 
-    as.data.frame() %>% 
-    select("Genus") %>% 
-    rownames_to_column(var = "ASV") %>% 
-    right_join((as.data.frame(top.coef) %>%
-    rownames_to_column(var = "ASV"))) %>% 
-    select(!"ASV") %>% 
-    arrange(top.coef)
-
-return(genus_contributors)
+```{r, warning=F, message=F, eval=F}
+ordination_plots <- function(filtered_ps, variable, vis_method, dist_method){
+# ordinate
+ps_ordination <- ordinate(filtered_ps, method = vis_method, distance = dist_method)
+# get eignenvalues
+evals <- ps_ordination$values$Eigenvalues
+# generate plot
+plot_ordination(filtered_ps, ps_ordination, color = variable, 
+  title = "") +
+  labs(col = variable) +
+  coord_fixed(sqrt(evals[2] / evals[1])) +
+  geom_point(aes(label = ID), size = 5, alpha = 0.5) +
+  geom_text(aes(label = ifelse(ID == 319, as.character(Sample_Type), '')), hjust = 0, vjust = 2) +
+  scale_colour_viridis_d()
 }
 
-major_contributors(ps2.TSS, "Primary_Group") %>% 
-  filter(top.coef > 0) %>% 
-  group_by(Genus) %>% 
-  summarise("top.coef" = mean(top.coef)) %>% # ASVs from same genus 
-  rbind(
-    major_contributors(ps2.TSS, "Primary_Group") %>% 
-  filter(top.coef < 0) %>% 
-  group_by(Genus) %>% 
-  summarise("top.coef" = mean(top.coef))
-  ) %>%  
-  ggplot(aes(x = top.coef, y = Genus, fill = top.coef)) +
+PCoA <- ordination_plots(ps2_storage, "URN", "PCoA", "bray")
+
+envfit <- envfit_object$factors$r %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Variable") %>%  
+  dplyr::rename("r2" = ".") %>%  # changed to 0.1 for plot 
+  left_join(
+    envfit_object$factors$pvals %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Variable") %>%  
+  dplyr::rename("p" = ".")
+  ) %>% 
+  ggplot(aes(x = r2, y = Variable, fill = p)) +
   geom_col() +
-  theme(axis.line =  element_line(size = .5), panel.background = element_blank()) +
-  geom_vline(xintercept = 0.0, linetype = 1, size = .5) + 
-  scale_fill_continuous(type = "viridis", name = "Coefficient") +
-  theme(axis.title.x = element_blank())
+  geom_point(size = 5) +
+  theme(axis.line =  element_line(size = .5), panel.background = element_blank(), aspect.ratio = 4/3) + 
+  scale_fill_continuous(type = "viridis") +
+  scale_y_discrete(labels = c("Sample_Type" = "Storage")) +
+  ylab("Covariates") 
+  
+grid_plot <- grid.arrange(PCoA, envfit, ncol=2)
+
+ggsave("outputs/PCoA.png", dpi = 600, height = 6, width = 6, PCoA)
+
+ggsave("outputs/envfit.png", dpi = 600, height = 5, width = 5, envfit)
+
+ggsave("outputs/envfit.png", dpi = 600, height = 5, width = 7, grid_plot)
 ```
+
+
+# Differential abundance
+
+## Taxanomic distribution.
+
+### Bar charts
+ - Use `plot_bar_auto()` function wrapped around phyloseq's `plot_bar()` to explore the distribution of taxa at the genus and phylum levels.
+ - Subset transformed data (relative abundance) to only the top20 taxa.
+ 
+```{r, warning=F, message=F, fig.cap="Bar plots of the taxonomic distribution (relative abundance) at the genus levels."}
+top20 <- names(sort(taxa_sums(ps4_storage), decreasing=TRUE))[1:20]
+ps.top20 <- prune_taxa(top20, ps4_storage)
+
+plot_bar_auto <- function(ps, taxonomy){
+plot_bar(ps, fill = taxonomy) + 
+    facet_wrap(~URN, scales = "free_x") + 
+    labs(title = paste0("Level:", taxonomy), y = "Abundance") + 
+    theme(legend.position = "bottom", legend.title = element_blank(), 
+    axis.title.x = element_blank(), axis.text.x = element_blank(), 
+    axis.ticks = element_blank()) +
+    scale_fill_viridis_d()
+}
+
+grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
+             plot_bar_auto(ps.top20, "Genus"),
+             nrow = 2, heights = c(1, 1))
+```
+
+**We do not have enough biological replicates to perform [DE analysis](https://europepmc.org/article/PMC/4878611)**.
+
+#### Export Plot
+```{r,warning=F,message=F,eval=F}
+grid_plot <- grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
+             plot_bar_auto(ps.top20, "Genus"),
+             nrow = 2, heights = c(1, 1))
+
+ggsave("outputs/taxonomy_plot.png", dpi = 600, height = 10, width = 10, grid_plot)
+```
+
+
+
+## Alpha diversity.
+ - Define a function that calculates Shannon Index, Obsverved (richness) & Chao1 diversity, and binds it to our original metadata dataframe, which can then be used for analysis.
+ 
+```{r,warning=F,message=F}
+ps2_storage <- subset_samples(ps2, Study == "2") %>% 
+  subset_samples(URN != "957652") %>% 
+  subset_samples(URN != "648892")
+```
+
+
+```{r, warning=F, message=F, eval=F}
+calc_alpha_diversity <- function(ps2_storage){
+# calculate metrics
+ps_alpha_div <- ps2_storage %>%
+                estimate_richness(measures = c("Shannon", "Observed", "Chao1")) %>% 
+                select(-se.chao1)
+
+# creat ID column based on rownames
+ps_alpha_div <- rownames_to_column(ps_alpha_div, var = "ID") %>% 
+                mutate(ID = as.factor(gsub("X", "", ID)))
+
+# join alpha metrics with metadata by the ID column
+Metadata %>%
+  filter(Study == "2") %>% 
+  right_join(ps_alpha_div, by = "ID") %>%
+  as.data.frame() 
+}
+
+ps_metadata <- calc_alpha_diversity(ps2_storage)
+```
+
+### Distribution
+
+#### Histogram
+ 
+```{r, warning=F, message=F}
+# To determine if diveristy is normally distributed
+ggplot(ps_metadata, aes(x = Shannon)) + 
+  geom_histogram() + 
+  xlab("Alpha Diversity") + ylab("Count")
+```
+
+#### Test for normality.
+ 
+```{r, warning=F, message=F}
+shapiro.test(ps_metadata$Shannon)
+```
+
+### Plot 
+
+#### Point
+
+ - Use `plot_richness()` from *phyloseq*, which estimates alpha diversity metrics using *vegan* and plots them, taking standard *ggplot2* *geoms_* for the plot design.
+ - use ps2 non-transformed data for alpha.
+ 
+```{r, warning=F, message=F}
+plot_richness(ps2_storage, measures = c("Shannon", "Observed"), 
+              color = "URN", title = "") +
+    geom_point(size = 3.5, alpha = 0.7) +
+    theme(axis.text.x = element_blank(), 
+          axis.ticks.x = element_blank(), 
+          panel.border = element_rect(colour = "grey", fill = NA, size = 1))+
+  scale_color_viridis_d() +
+  xlab("Samples") +
+  ylab("Alpha Diversity")
+```
+#### Export plot
+```{r, warning=F, message=F}
+ggsave("outputs/aplha_plot.png", dpi = 600 , height = 8, width = 8)
+```
+
+#### Boxplot comparing storage types
+```{r, warning=F, message=F}
+ps_metadata %>% 
+  ggplot(aes(x = Sample_Type, y = Shannon, colour = Sample_Type)) +
+  geom_boxplot() +
+  labs(x = "Storage Method", y = "Shannon Diversity") +
+  stat_compare_means() +
+  theme(legend.position = "none") +
+  scale_color_viridis_d()
+```
+
+#### Comparing storage types within URNs
+
+```{r}
+plot_richness(ps2_storage, measures = c("Shannon"), 
+              color = "Sample_Type", title = "") +
+    geom_point(size = 3.5, alpha = 0.7) +
+    theme(axis.text.x = element_blank(), 
+          axis.ticks.x = element_blank(), 
+          panel.border = element_rect(colour = "grey", fill = NA, size = 1))+
+  scale_color_viridis_d() + 
+  facet_wrap(~URN) 
+```
+
+### Statistical test: compare mean/median between groups.
+- define a function that performs a Wilcoxin test on the three diversity metrics and binds them (Shannon Index, Richness & Chao1).
+
+```{r, warning=F, message=F}
+diversity_analysis <- function(ps_metadata){
+
+Shannon <- compare_means(Shannon ~ Sample_Type, data = ps_metadata, 
+                         method = "wilcox.test", p.adjust.method = "fdr")
+
+Observed <- compare_means(Observed ~ Sample_Type, data = ps_metadata, 
+                          method = "wilcox.test", p.adjust.method = "fdr")
+
+Chao1 <- compare_means(Chao1 ~ Sample_Type, data = ps_metadata, 
+                       method = "wilcox.test", p.adjust.method = "fdr")
+
+bind_rows(Shannon, Observed, Chao1) %>%
+  rename(c(".y." = "Diversity Measure"))
+}
+
+diversity_analysis(ps_metadata)
+```
+
+### GLM 
+
+**Based on same formula as PERMANOVA**
+
+### Test for collinearity using known microbiome-covariates
+
+```{r,warning=F,message=F,eval=F}
+# defin myvif function
+myvif <- function(mod) {
+  v <- vcov(mod)
+  assign <- attributes(model.matrix(mod))$assign
+  if (names(coefficients(mod)[1]) == "(Intercept)") {
+    v <- v[-1, -1]
+    assign <- assign[-1]
+  } else warning("No intercept: vifs may not be sensible.")
+  terms <- labels(terms(mod))
+  n.terms <- length(terms)
+  if (n.terms < 2) stop("The model contains fewer than 2 terms")
+  if (length(assign) > dim(v)[1] ) {
+    diag(tmp_cor)<-0
+    if (any(tmp_cor==1.0)){
+      return("Sample size is too small, 100% collinearity is present")
+    } else {
+      return("Sample size is too small")
+    }
+  }
+  R <- cov2cor(v)
+  detR <- det(R)
+  result <- matrix(0, n.terms, 3)
+  rownames(result) <- terms
+  colnames(result) <- c("GVIF", "Df", "GVIF^(1/2Df)")
+  for (term in 1:n.terms) {
+    subs <- which(assign == term)
+    result[term, 1] <- det(as.matrix(R[subs, subs])) * det(as.matrix(R[-subs, -subs]))/detR
+    result[term, 2] <- length(subs)
+  }
+  if (all(result[, 2] == 1)) {
+    result <- data.frame(GVIF=result[, 1])
+  } else {
+    result[, 3] <- result[, 1]^(1/(2 * result[, 2]))
+  }
+  invisible(result)
+}
+
+# corvif
+corvif <- function(data) {
+  data <- as.data.frame(data)
+
+  form    <- formula(paste("fooy ~ ",paste(strsplit(names(data)," "),collapse = " + ")))
+  data  <- data.frame(fooy = 1 + rnorm(nrow(data)) ,data)
+  lm_mod  <- lm(form,data) # runs linear model with above formula and metadata
+  
+  cat("\n\nVariance inflation factors\n\n")
+  print(myvif(lm_mod))
+}
+
+ps_metadata %>% 
+  select(URN, Sample_Type) %>% 
+  corvif()
+
+```
+
+### Fit Model
+
+```{r,warning=F,message=F}
+global <- glm(Shannon ~ Sample_Type + URN, data = ps_metadata, 
+                        family = Gamma(link = "log")) 
+
+global
+
+car::Anova(global) %>% 
+  as.data.frame(row.names = NULL)
+
+emmeans(global, list(pairwise ~ Sample_Type), adjust = "tukey") %>% 
+  pairs() %>% 
+  as.data.frame() 
+```
+
+```{r,warning=F,message=F,eval=F}
+gof(global)
+r.squaredGLMM(global)
+```
+
+
+
+
+
+
+
+
+
+
+
+
