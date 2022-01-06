@@ -244,9 +244,7 @@ ggsave("outputs/envfit.png", dpi = 600, height = 5, width = 7, grid_plot)
 ```
 
 
-# Differential abundance
-
-## Taxanomic distribution.
+## Taxanomic abundance.
 
 ### Bar charts
  - Use `plot_bar_auto()` function wrapped around phyloseq's `plot_bar()` to explore the distribution of taxa at the genus and phylum levels.
@@ -271,7 +269,6 @@ grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
              nrow = 2, heights = c(1, 1))
 ```
 
-**We do not have enough biological replicates to perform [DE analysis](https://europepmc.org/article/PMC/4878611)**.
 
 #### Export Plot
 ```{r,warning=F,message=F,eval=F}
@@ -282,7 +279,57 @@ grid_plot <- grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
 ggsave("outputs/taxonomy_plot.png", dpi = 600, height = 10, width = 10, grid_plot)
 ```
 
+## Perform DESeq2 analysis
 
+ - Define function for calculating geometric means and estimating size factors.
+ - Define function to filter out taxa with small counts and low occurance. *count* and *samples* arguments need to be applied as numerical values.
+ 
+```{r, warning=F, message=F}
+calc_geo_means <- function(deseq_object){
+# geometric mean
+  gm_mean = function(x, na.rm = TRUE){
+    exp(sum(log(x[x > 0]), na.rm = na.rm) / length(x))
+  }
+  geoMeans <- apply(counts(deseq_object), 1, gm_mean)
+# size factors
+  estimateSizeFactors(deseq_object, geoMeans = geoMeans) 
+}
+
+deseq_filter <- function(deseq_object, count, samples){ 
+  nc <- counts(deseq_object, normalized = TRUE)
+  filtered <- rowSums(nc >= count) >= samples 
+  deseq_object[filtered,]
+}
+```
+
+ - Define a function to extract the results.
+ - Convert from *phyloseq* to *deseq* object.
+ - Use prevviously defined functions to calculate geometric means and filter to the most abundant and frequent taxa.
+ - Use `Deseq()` to perform the normalisation and analysis.
+ - Extract the results using appropriate previosuly defined function.
+ 
+```{r, warning=F,message=F}
+# define function for Wald test
+get_deseq_res_cat <- function(desq_object, contrast_variable, level1, level2){
+  res = results(desq_object, contrast = c(contrast_variable, level1, level2))
+  res = res[order(res$padj, na.last = NA), ]
+  sigtab = res[(res$padj < 0.05), ] 
+  sigtab = cbind(as(sigtab, "data.frame"), 
+    as(tax_table(ps3_storage)[rownames(sigtab), ], "matrix"))
+  sigtab %>%
+  arrange(padj) %>%
+  select("log2FoldChange", "lfcSE", "padj", "Genus") %>%
+  add_column(Variable = paste0(contrast_variable, level1)) # label the base level
+}
+
+phyloseq_to_deseq2(ps3_storage, ~ Sample_Type + URN) %>% 
+                  calc_geo_means() %>% 
+                  deseq_filter(1, 5) %>% # count > 1 in at 5 samples
+                  DESeq(fitType = "local", test = "Wald") %>% 
+                  get_deseq_res_cat("Sample_Type", "Original", "OMNIgene") %>% 
+                  remove_rownames() %>% 
+                  knitr::kable()
+```
 
 ## Alpha diversity.
  - Define a function that calculates Shannon Index, Obsverved (richness) & Chao1 diversity, and binds it to our original metadata dataframe, which can then be used for analysis.
