@@ -1,5 +1,17 @@
-# Long_term_effects_of_probiotics
+# Long term effects of probiotics
 
-Microbiome analyses and supplementary data for a pliot study exploring if differences observed in probiotic-treated and non-treated infants at discharge persist beyond the first year of life.The main objective of this work was to determine if the effectiveness of the protocol. Firstly, if staudy participants (their parents) would be willing to partake in at home recruitment and collection. In addition, as the collection had to be done at home and mailed into the laboratory, we also made a comparison between storage at -80 and with our chosen collection kit, which suspends the sample in DNA-stabilising buffer. Lastly, although the main objective of this pilot was to determine if this protocol would be effective, we also made comparisons on a small dataset for treated and non-treated infants, whilst accounting for a few additional covariates (the number of covariates incldued in the modelling was limited by the small sample size).
+Microbiome analyses and supplementary data for a pliot study exploring if differences observed in probiotic-supplemented and non-supplemented infants at discharge persist beyond the first year of life. This work has been divided into two separate papers.
 
-The manuscript is yet to be published, but a link will be added **HERE** when it is.
+
+## A validation of at-home infant stool sample collection devices for determining the faecal microbiome.
+
+In this study we present a validation of at-home infant stool sample collection with the OMNIgene® GUT kit. Using 16S rRNA metabarcoding we compared samples stored using the OMNIgene® GUT kit to same samples collected in a standard/sterile collection tube at - 80C for 3 months. We observed the storage comparison to have no significant effect on read depth or microbial composition of samples. The OMNIgene® GUT kit is a reliable option for sampling preterm infants at home.
+
+The DOI will be added when published.
+
+
+## Exploring colonisation and long-term persistence of species from early life probiotic-prophylaxis on the gut microbiome of preterm infants.
+
+This paper is still a work in progress and will be updated upon submission.
+
+

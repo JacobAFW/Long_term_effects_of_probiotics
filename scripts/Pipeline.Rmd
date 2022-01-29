@@ -313,10 +313,29 @@ Metadata <- readxl::read_excel("data/metadata/Metadata.xlsx") %>%
   filter(ID != "NO SAMPLE", Study != "BLANK") %>% 
   mutate(row_names = ID) %>% 
   column_to_rownames("row_names") %>% 
-  arrange(URN) %>% 
   mutate_if(is.character, as.factor) %>% 
-  mutate(Sample_Type = ifelse(OMNIgene_Number == "Original", "Original", "OMNIgene"))
+  mutate(Sample_Type = ifelse(OMNIgene_Number == "Original", "Original", "OMNIgene")) 
 ```
+
+
+
+
+
+## De-identify **REMOVE FROM UPLOADED SCRIPT**
+```{r, warning=F, message=F, eval=F}
+Metadata <- Metadata %>% 
+  mutate(URN = as.character(URN)) %>%
+  mutate(URN = ifelse(URN == "647780", "1", URN),
+         URN = ifelse(URN == "648195", "2", URN),
+         URN = ifelse(URN == "648890", "3", URN),
+         URN = ifelse(URN == "957821", "4", URN),
+         URN = ifelse(URN == "957844", "5", URN)) %>% 
+  mutate(URN = as.factor(URN))
+```
+
+
+
+
 
 ## Constrcut the Phyloseq object.
  - Includes: metadata, ASV table, taxonomy table and phylogenetic tree.
@@ -347,15 +366,6 @@ sample_data(ps) %>%
 
 ```{r, warning=F, message=F, results='hide', eval=F}
 ps1 <- subset_taxa(ps, !is.na(Phylum) & !Phylum %in% c("", "uncharacterized"))
-```
-
-### Remove problematic samples
- - samples that produce NA values during transformations downstream in the otu_table (for some reason it won't allow all within the same function, hence the pipe)
- 
-```{r, warning=F, message=F, eval=F}
-#ps1 <- subset_samples(ps1, ID != "219") %>%  
- # subset_samples(ID != "141") %>% 
- # subset_samples(ID != "118")
 ```
 
 #### Check percentages of NA values left.

@@ -107,26 +107,6 @@ sample_data(ps) %>%
 ps1 <- subset_taxa(ps, !is.na(Phylum) & !Phylum %in% c("", "uncharacterized"))
 ```
 
-### Remove problematic samples
- - samples that produce NA values during transformations downstream in the otu_table (for some reason it won't allow all within the same function, hence the pipe)
- 
-```{r, warning=F, message=F, eval=F}
-#ps1 <- subset_samples(ps1, ID != "219") %>%  
- # subset_samples(ID != "141") %>% 
- # subset_samples(ID != "118")
-```
-
-#### Check percentages of NA values left.
-```{r,warning=F,message=F}
-# Total
-sum(is.na(tax_table(ps1)))/prod(dim(tax_table(ps1))) * 100
-```
-
-```{r,warning=F,message=F}
-# Per taxonomic rank
-apply(tax_table(ps1), 2, function(col)sum(is.na(col))/length(col)) * 100
-```
-
 ### Filtering.
  - Using an unsupervised method (relying on the data in this experiment) explore the prevelance of features in the dataset.
  - Calculate the prevalence of each feature and store as a dataframe.
@@ -295,6 +275,37 @@ permanova <- adonis2(ps_otu ~Probiotics + Delivery + Diet, data = ps_metadata, m
 permanova 
 ```
 
+#### Export
+```{r, warning=F, message=F, eval=F}
+permanova_func <- function(ps2){
+  
+# permanova
+ps_otu <- data.frame(otu_table(ps2))
+ps_metadata <- data.frame(sample_data(ps2))
+permanova <- adonis2(ps_otu ~Probiotics + Delivery + Diet, data = ps_metadata, method = "bray", by = "margin") # adnois 2
+permanova <- permanova %>% 
+  as.data.frame() %>% 
+  mutate_at(c(2:5), ~round(., digits = 2)) %>% 
+  tableGrob() %>% 
+  annotate_figure(fig.lab = "PERMANOVA", fig.lab.face = "bold", fig.lab.size = 15)
+
+# homogeneity condition
+dist <- vegdist(ps_otu)
+homogeneity <- as.data.frame(anova(betadisper(dist, ps_metadata$Probiotics))) %>% 
+  mutate_at(c(2:5), ~round(., digits = 2)) %>% 
+  tableGrob() %>% 
+  annotate_figure(fig.lab = "Homogeneity Condition", fig.lab.face = "bold", fig.lab.size = 15)
+
+# combine ouputs in a grid
+grid.arrange(permanova, homogeneity, ncol = 1)
+
+}
+
+permanova_table <- permanova_func(ps2)
+
+ggsave("outputs/shotgun/permanova.png", dpi = 600, height = 5, width = 5, permanova_table)
+```
+
 #### Statisitcal test: envfit
 
 ```{r,warning=F,message=F,eval=F}
@@ -333,8 +344,12 @@ p.adjust.envfit <- function (x, method = 'bonferroni', n){
 
 set.seed(1)
 
-envfit(ordination_distance, envdat.phy, permutations = 10000) %>% 
-  p.adjust.envfit(., method = "BH") 
+envfit_object <- envfit(ordination_distance, envdat.phy, permutations = 10000) %>% 
+  p.adjust.envfit(., method = "BH")
+
+envfit_object$factors %>% 
+  unclass() %>% 
+  as.data.frame()
 ```
 
 # Differential abundance
@@ -346,14 +361,14 @@ envfit(ordination_distance, envdat.phy, permutations = 10000) %>%
  - Subset transformed data (relative abundance) to only the top20 taxa.
  
 ```{r, warning=F, message=F, fig.cap="Bar plots of the taxonomic distribution (relative abundance) at the genus levels."}
-top20 <- names(sort(taxa_sums(ps4), decreasing=TRUE))[1:20]
+top20 <- names(sort(taxa_sums(ps4), decreasing=TRUE))[1:30]
 ps.top20 <- prune_taxa(top20, ps4)
 
 plot_bar_auto <- function(ps, taxonomy){
 plot_bar(ps, fill = taxonomy) + 
     facet_wrap(~Probiotics, scales = "free_x") + 
     labs(title = paste0("Level:", taxonomy), y = "Abundance") + 
-    theme(legend.position = "none", legend.title = element_blank(), 
+    theme(legend.position = "bottom", legend.title = element_blank(), 
     axis.title.x = element_blank(), axis.text.x = element_blank(), 
     axis.ticks = element_blank()) +
     scale_fill_viridis_d()
@@ -361,10 +376,19 @@ plot_bar(ps, fill = taxonomy) +
 
 grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
              plot_bar_auto(ps.top20, "Species"),
-             nrow = 2, heights = c(1, 1))
+             nrow = 2, heights = c(1, 1.2))
 ```
 
-```{r, warning=F, message=F, fig.cap="Bar plots of the taxonomic distribution (relative abundance) at the genus levels."}
+#### Export Plot
+```{r,warning=F,message=F,eval=F}
+grid_plot <- grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
+             plot_bar_auto(ps.top20, "Species"),
+             nrow = 2, heights = c(1, 1.2))
+
+ggsave("outputs/shotgun/taxonomy_plot.png", dpi = 600, height = 10, width = 12, grid_plot)
+```
+
+```{r, warning=F, message=F}
 top20 <- names(sort(taxa_sums(ps4), decreasing=TRUE))[1:50]
 ps.top20 <- prune_taxa(top20, ps4)
 
@@ -383,14 +407,7 @@ grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
              nrow = 2, heights = c(1, 1))
 ```
 
-#### Export Plot
-```{r,warning=F,message=F,eval=F}
-grid_plot <- grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
-             plot_bar_auto(ps.top20, "Species"),
-             nrow = 2, heights = c(1, 1))
 
-ggsave("outputs/shotgun/taxonomy_plot.png", dpi = 600, height = 7, width = 10, grid_plot)
-```
 
 ## Perform DESeq2 analysis
 
@@ -516,7 +533,7 @@ plot_richness(ps2, measures = c("Shannon", "Observed"),
 ggsave("outputs/shotgun/aplha_plot.png", dpi = 600 , height = 7, width = 8)
 ```
 
-### Fit Model
+### Fit Model - Shannon
 
 ```{r,warning=F,message=F}
 global <- glm(Shannon ~ Probiotics + Delivery + Diet, data = ps_metadata) 
@@ -536,4 +553,22 @@ gof(global)
 r.squaredGLMM(global)
 ```
 
+### Fit Model - Observed
 
+```{r,warning=F,message=F}
+global <- glm(Observed ~ Probiotics + Delivery + Diet, data = ps_metadata) 
+
+global
+
+car::Anova(global) %>% 
+  as.data.frame(row.names = NULL)
+
+emmeans(global, list(pairwise ~ Probiotics), adjust = "tukey") %>% 
+  pairs() %>% 
+  as.data.frame() 
+```
+
+```{r,warning=F,message=F,eval=F}
+gof(global)
+r.squaredGLMM(global)
+```

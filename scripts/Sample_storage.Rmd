@@ -57,14 +57,14 @@ ps2_storage <- ps2_storage %>%
  - Extract eigenvalues from ordination.
 
 ```{r, fig.cap="PCoA plot of Bray-Curtis distances coloured by date.", warning=F, message=F}
-ordination_plots <- function(filtered_ps, variable, vis_method, dist_method){
+ordination_plots <- function(filtered_ps, variable, variable_2, vis_method, dist_method){
 # ordinate
 ps_ordination <- ordinate(filtered_ps, method = vis_method, distance = dist_method)
 # get eignenvalues
 evals <- ps_ordination$values$Eigenvalues
 # generate plot
-plot_ordination(filtered_ps, ps_ordination, color = variable, 
-  title = "PCoA (Bray-Curtis)") +
+plot_ordination(filtered_ps, ps_ordination, color = variable, shape = variable_2,
+  title = ) +
   labs(col = variable) +
   coord_fixed(sqrt(evals[2] / evals[1])) +
   geom_point(aes(label = ID), size = 5, alpha = 0.5) +
@@ -72,9 +72,10 @@ plot_ordination(filtered_ps, ps_ordination, color = variable,
   scale_colour_viridis_d()
  }
 
-ordination_plots(ps2_storage, "URN", "PCoA", "bray")
+ordination_plots(ps2_storage, "URN", "Sample_Type", "PCoA", "bray") +
+  scale_shape_discrete(name = "Storage") 
 
-#ggsave("outputs/PCoA.png", dpi = 600, height = 5, width = 7)
+ggsave("outputs/PCoA.png", dpi = 600, height = 3, width = 5)
 ```
 
 **319 = OMNIgene sample, not original sample. However, it does have the greatest read depth of the samples within this URN. Thus, I hypothesise that the greater read depth means that more diversity was captured by this particular sample, and that although we have filtered out those taxa not frequently observed and normalised the data with TSS, these methods (no methods) are perfect. For instance, sample 319 may have some taxa that are in low abundance within the context of URN 648890, but are still widely distributed throughout the other URNs, and thus are not removed and can still contribute to a greater distance to its technical replicates.**
@@ -118,7 +119,7 @@ permanova <- tableGrob(as.data.frame(permanova)) %>%
 
 # homogeneity condition
 dist <- vegdist(ps_otu)
-homogeneity <- as.data.frame(anova(betadisper(dist, ps_metadata$URN))) %>% 
+homogeneity <- as.data.frame(anova(betadisper(dist, ps_metadata$Sample_Type))) %>% 
   tableGrob() %>% 
   annotate_figure(fig.lab = "Homogeneity Condition", fig.lab.face = "bold", fig.lab.size = 15)
 
@@ -128,8 +129,6 @@ grid.arrange(permanova, homogeneity, ncol = 1)
 }
 
 permanova_func(ps2_storage)
-
-rm()
 ```
 
 #### Mixed effects comparison with technical replicates nested within individuals using envfit
@@ -145,7 +144,7 @@ envdat.phy <- ps2_storage %>%
   sample_data() %>%
   unclass() %>% 
   as.data.frame() %>% 
-  select(URN, Sample_Type) 
+  select(Sample_Type, URN) 
 
 set.seed(1)
 
@@ -240,7 +239,7 @@ ggsave("outputs/PCoA.png", dpi = 600, height = 6, width = 6, PCoA)
 
 ggsave("outputs/envfit.png", dpi = 600, height = 5, width = 5, envfit)
 
-ggsave("outputs/envfit.png", dpi = 600, height = 5, width = 7, grid_plot)
+ggsave("outputs/grid_plot.png", dpi = 600, height = 5, width = 7, grid_plot)
 ```
 
 
@@ -254,26 +253,52 @@ ggsave("outputs/envfit.png", dpi = 600, height = 5, width = 7, grid_plot)
 top20 <- names(sort(taxa_sums(ps4_storage), decreasing=TRUE))[1:20]
 ps.top20 <- prune_taxa(top20, ps4_storage)
 
-plot_bar_auto <- function(ps, taxonomy){
-plot_bar(ps, fill = taxonomy) + 
-    facet_wrap(~URN, scales = "free_x") + 
-    labs(title = paste0("Level:", taxonomy), y = "Abundance") + 
-    theme(legend.position = "bottom", legend.title = element_blank(), 
-    axis.title.x = element_blank(), axis.text.x = element_blank(), 
-    axis.ticks = element_blank()) +
-    scale_fill_viridis_d()
+
+sample_data(ps.top20) <- sample_data(ps.top20) %>% 
+  unclass() %>% 
+  as.data.frame() %>% 
+  mutate(URN = paste0("URN ", URN)) %>% 
+  mutate("Sample" = ID) %>% 
+  mutate(OMNIgene_Number = ifelse(OMNIgene_Number == "Original", "Original", "OMNIgene")) %>% 
+  column_to_rownames("Sample") 
+
+modified_plot_bar <- function (physeq, x = "Sample", y = "Abundance", 
+    fill = NULL, title = NULL, facet_grid = NULL, alpha = NULL){
+    mdf = psmelt(physeq)
+    p = ggplot(mdf, aes_string(x = x, y = y, fill = fill, alpha = alpha))
+    p = p + geom_bar(stat = "identity", position = "stack", 
+        color = "black")
+    p = p + theme(axis.text.x = element_text(angle = -90, hjust = 0))
+    if (!is.null(facet_grid)) {
+        p <- p + facet_grid(facet_grid)
+    }
+    if (!is.null(title)) {
+        p <- p + ggtitle(title)
+    }
+    return(p)
 }
 
-grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
-             plot_bar_auto(ps.top20, "Genus"),
+plot_bar_auto <- function(ps, taxonomy, alpha){
+modified_plot_bar(ps, fill = taxonomy, alpha = alpha) + 
+    facet_wrap(~URN, scales = "free_x") + 
+    labs(title = paste0("Level:", taxonomy), y = "Abundance") + 
+    theme(legend.position = "bottom", legend.title = element_blank(),
+    axis.title.x = element_blank(), axis.text.x = element_blank(), 
+    axis.ticks = element_blank()) +
+    scale_fill_viridis_d() +
+    scale_alpha_discrete(range = c(1, 0.5), name = "Storage") 
+}
+
+grid.arrange(plot_bar_auto(ps.top20, "Phylum", "OMNIgene_Number"),
+             plot_bar_auto(ps.top20, "Genus", "OMNIgene_Number"),
              nrow = 2, heights = c(1, 1))
 ```
 
 
 #### Export Plot
 ```{r,warning=F,message=F,eval=F}
-grid_plot <- grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
-             plot_bar_auto(ps.top20, "Genus"),
+grid_plot <- grid.arrange(plot_bar_auto(ps.top20, "Phylum", "OMNIgene_Number"),
+             plot_bar_auto(ps.top20, "Genus", "OMNIgene_Number"),
              nrow = 2, heights = c(1, 1))
 
 ggsave("outputs/taxonomy_plot.png", dpi = 600, height = 10, width = 10, grid_plot)
@@ -388,18 +413,20 @@ shapiro.test(ps_metadata$Shannon)
  
 ```{r, warning=F, message=F}
 plot_richness(ps2_storage, measures = c("Shannon", "Observed"), 
-              color = "URN", title = "") +
+              color = "URN", title = "", shape = "Sample_Type") +
     geom_point(size = 3.5, alpha = 0.7) +
     theme(axis.text.x = element_blank(), 
           axis.ticks.x = element_blank(), 
           panel.border = element_rect(colour = "grey", fill = NA, size = 1))+
   scale_color_viridis_d() +
-  xlab("Samples") +
-  ylab("Alpha Diversity")
+  xlab("Technical Replicates") +
+  ylab("Alpha Diversity") +
+  scale_shape_discrete("Storage")
 ```
+
 #### Export plot
 ```{r, warning=F, message=F}
-ggsave("outputs/aplha_plot.png", dpi = 600 , height = 8, width = 8)
+ggsave("outputs/alpha_plot.png", dpi = 600 , height = 8, width = 8)
 ```
 
 #### Boxplot comparing storage types
@@ -510,7 +537,7 @@ ps_metadata %>%
 
 ```
 
-### Fit Model
+### Fit Model - Shannon
 
 ```{r,warning=F,message=F}
 global <- glm(Shannon ~ Sample_Type + URN, data = ps_metadata, 
@@ -531,14 +558,77 @@ gof(global)
 r.squaredGLMM(global)
 ```
 
+### Fit Model - Richness
+
+```{r,warning=F,message=F}
+global <- glm(Observed ~ Sample_Type + URN, data = ps_metadata, 
+                        family = Gamma(link = "log")) 
+
+global
+
+car::Anova(global) %>% 
+  as.data.frame(row.names = NULL)
+
+emmeans(global, list(pairwise ~ Sample_Type), adjust = "tukey") %>% 
+  pairs() %>% 
+  as.data.frame() 
+```
+
+```{r,warning=F,message=F,eval=F}
+gof(global)
+r.squaredGLMM(global)
+```
 
 
+# Read depth
 
+```{r,warning=F,message=F,eval=F}
+ps_storage <- subset_samples(ps, Study == "2") %>% 
+  subset_samples(URN != "957652") %>% 
+  subset_samples(URN != "648892")
 
+read_depth <- sample_data(ps_storage) %>% 
+  unclass() %>% 
+  as.data.frame() %>% 
+  mutate(TotalReads = as.numeric(sample_sums(ps_storage))) %>%
+  arrange(URN) %>% 
+  add_column(ID_Plot = 1:nrow(.)) 
+  
+read_depth %>% 
+  mutate(OMNIgene_Number = ifelse(OMNIgene_Number == "Original", "Original", "OMNIgene")) %>% 
+  ggplot(aes(y = TotalReads, x = ID_Plot, fill = URN, alpha = OMNIgene_Number)) + 
+  geom_col() +
+  ggtitle("") +
+  xlab("Techincal Replicates") +
+  ylab("Read depth")  +
+  scale_fill_viridis_d() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  scale_alpha_discrete(range = c(1, 0.5), name = "Storage") 
+```
 
+#### Export plot
+```{r, warning=F, message=F}
+ggsave("outputs/read_depth.png", dpi = 600 , height = 6, width = 9)
+```
 
+#### Test for normality.
+ 
+```{r, warning=F, message=F}
+shapiro.test(read_depth$TotalReads)
+```
 
+```{r,warning=F,message=F}
+global <- glm(TotalReads ~ Sample_Type + URN, data = read_depth)  
 
+global
+
+car::Anova(global) %>% 
+  as.data.frame(row.names = NULL)
+
+emmeans(global, list(pairwise ~ Sample_Type), adjust = "tukey") %>% 
+  pairs() %>% 
+  as.data.frame() 
+```
 
 
 
