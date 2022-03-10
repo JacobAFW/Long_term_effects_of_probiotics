@@ -239,7 +239,7 @@ plot_ordination(filtered_ps, ps_ordination, color = variable,
   coord_fixed(sqrt(evals[2] / evals[1])) +
   geom_point(aes(label = ID), size = 5) +
   geom_text(aes(label = ifelse(ID == 319, as.character(Sample_Type), '')), hjust = 0, vjust = 2) +
-  scale_colour_viridis_d()
+  scale_color_manual(values = c("#440154FF", "#55C667FF"))
  }
 
 ordination_plots(ps2, "Probiotics", "PCoA", "bray")
@@ -366,6 +366,7 @@ ps.top20 <- prune_taxa(top20, ps4)
 
 plot_bar_auto <- function(ps, taxonomy){
 plot_bar(ps, fill = taxonomy) + 
+    geom_bar(aes(fill=Genus), stat="identity", position="stack") +
     facet_wrap(~Probiotics, scales = "free_x") + 
     labs(title = paste0("Level:", taxonomy), y = "Abundance") + 
     theme(legend.position = "bottom", legend.title = element_blank(), 
@@ -381,11 +382,9 @@ grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
 
 #### Export Plot
 ```{r,warning=F,message=F,eval=F}
-grid_plot <- grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
-             plot_bar_auto(ps.top20, "Species"),
-             nrow = 2, heights = c(1, 1.2))
+plot_bar_auto(ps.top20, "Species")
 
-ggsave("outputs/shotgun/taxonomy_plot.png", dpi = 600, height = 10, width = 12, grid_plot)
+ggsave("outputs/shotgun/taxonomy_plot.png", dpi = 600, height = 6, width = 12)
 ```
 
 ```{r, warning=F, message=F}
@@ -524,13 +523,13 @@ plot_richness(ps2, measures = c("Shannon", "Observed"),
     theme(axis.text.x = element_blank(), 
           axis.ticks.x = element_blank(), 
           panel.border = element_rect(colour = "grey", fill = NA, size = 1))+
-  scale_color_viridis_d() +
-  xlab("Samples") +
+  scale_color_manual(values = c("#440154FF", "#55C667FF"))+
+  xlab("Infant Samples") +
   ylab("Alpha Diversity") 
 ```
 #### Export plot
 ```{r, warning=F, message=F}
-ggsave("outputs/shotgun/aplha_plot.png", dpi = 600 , height = 7, width = 8)
+ggsave("outputs/shotgun/aplha_plot.png", dpi = 600 , height = 6, width = 7)
 ```
 
 ### Fit Model - Shannon

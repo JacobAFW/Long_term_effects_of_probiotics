@@ -599,7 +599,7 @@ read_depth %>%
   ggplot(aes(y = TotalReads, x = ID_Plot, fill = URN, alpha = OMNIgene_Number)) + 
   geom_col() +
   ggtitle("") +
-  xlab("Techincal Replicates") +
+  xlab("Technical Replicates") +
   ylab("Read depth")  +
   scale_fill_viridis_d() +
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +

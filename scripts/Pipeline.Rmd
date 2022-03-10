@@ -259,16 +259,6 @@ seqtab.microdecon <- decontaminated$decon.table %>%
 ## Assign taxonomy.
  - With optional species addition (there is an agglomeration step downstream, so you can add species now for curiosities sake, and remove later for analysis).
  
-```{r, warning=F, message=F,eval=F}
-taxa <- assignTaxonomy(seqtab.microdecon,
-        "C:/Users/Jacob/Desktop/Jacob_Uni/Data/SCN_vs_NICU_probiotic_study/Data/silva_nr_v132_train_set.fa.gz")
-
-taxa.print <- taxa # Removes sequence rownames for display only
-rownames(taxa.print) <- NULL
-
-apply(taxa, 2, function(col)sum(is.na(col))/length(col)) * 100
-```
-
 ### Compare taxonomic assignment options
 
 ```{r, warning=F, message=F,eval=F}
@@ -277,16 +267,6 @@ taxa2 <- assignTaxonomy(seqtab.microdecon,
 
 apply(taxa2, 2, function(col)sum(is.na(col))/length(col)) * 100
 ```
-
-
-```{r, warning=F, message=F,eval=F}
-taxa3 <- assignTaxonomy(seqtab.microdecon, "data/silva_nr99_v138.1_train_set.fa.gz")
-
-apply(taxa3, 2, function(col)sum(is.na(col))/length(col)) * 100
-```
-**DELETE THE VERSION THAT HAS LESS TAXA?**
-
-
 
 
 
@@ -316,24 +296,6 @@ Metadata <- readxl::read_excel("data/metadata/Metadata.xlsx") %>%
   mutate_if(is.character, as.factor) %>% 
   mutate(Sample_Type = ifelse(OMNIgene_Number == "Original", "Original", "OMNIgene")) 
 ```
-
-
-
-
-
-## De-identify **REMOVE FROM UPLOADED SCRIPT**
-```{r, warning=F, message=F, eval=F}
-Metadata <- Metadata %>% 
-  mutate(URN = as.character(URN)) %>%
-  mutate(URN = ifelse(URN == "647780", "1", URN),
-         URN = ifelse(URN == "648195", "2", URN),
-         URN = ifelse(URN == "648890", "3", URN),
-         URN = ifelse(URN == "957821", "4", URN),
-         URN = ifelse(URN == "957844", "5", URN)) %>% 
-  mutate(URN = as.factor(URN))
-```
-
-
 
 
 
