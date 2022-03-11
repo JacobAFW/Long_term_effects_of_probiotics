@@ -273,10 +273,6 @@ ps4_combined <- transform_sample_counts(ps3_combined, function(x) x / sum(x))
 # Data exploration and univariate analysis.
 
 
-## About
-
-
-
 ## Load required packages. 
 
 ```{r, warning=F, message=F, results='hide'}

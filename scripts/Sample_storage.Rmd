@@ -78,7 +78,7 @@ ordination_plots(ps2_storage, "URN", "Sample_Type", "PCoA", "bray") +
 ggsave("outputs/PCoA.png", dpi = 600, height = 3, width = 5)
 ```
 
-**319 = OMNIgene sample, not original sample. However, it does have the greatest read depth of the samples within this URN. Thus, I hypothesise that the greater read depth means that more diversity was captured by this particular sample, and that although we have filtered out those taxa not frequently observed and normalised the data with TSS, these methods (no methods) are perfect. For instance, sample 319 may have some taxa that are in low abundance within the context of URN 648890, but are still widely distributed throughout the other URNs, and thus are not removed and can still contribute to a greater distance to its technical replicates.**
+*Sanple 319 = OMNIgene sample, not original sample. However, it does have the greatest read depth of the samples within this URN. Thus, I hypothesise that the greater read depth means that more diversity was captured by this particular sample, and that although we have filtered out those taxa not frequently observed and normalised the data with TSS, these methods (no methods) are perfect. For instance, sample 319 may have some taxa that are in low abundance within the context of URN 648890, but are still widely distributed throughout the other URNs, and thus are not removed and can still contribute to a greater distance to its technical replicates.*
 
 
 ### Statistical test: PERMANOVA.
