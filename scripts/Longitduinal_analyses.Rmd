@@ -1,0 +1,748 @@
+---
+title: "Longitudinal analyses"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/Users/Jacob/Desktop/Jacob_Uni/Data/Long_term_effects_of_probiotics')
+```
+
+# Merging multiple sequence runs
+
+## Load required packages.
+
+```{r, warning=F, message=F, results='hide'}
+sapply(c("dada2", "phyloseq", "DECIPHER", "phangorn", "BiocManager", "BiocStyle", 
+        "Biostrings", "ShortRead", "ggplot2", "gridExtra", "tibble", "tidyverse"), 
+        require, character.only = TRUE)
+```
+ 
+```{r,warning=F,message=F,eval=F}
+seqtab_combined <- mergeSequenceTables(seqtab.microdecon,
+                    (read_csv("data/longitudinal_data/seqtab_chp1.csv") %>% 
+                       column_to_rownames("ID") %>% 
+                       as.matrix()),
+                    (read_csv("data/longitudinal_data/seqtab_chp2.csv") %>% 
+                       column_to_rownames("ID") %>% 
+                       as.matrix()))
+```
+
+## Assign taxonomy.
+ - With optional species addition (there is an agglomeration step downstream, so you can add species now for curiosities sake, and remove later for analysis).
+
+### Compare taxonomic assignment options
+
+```{r, warning=F, message=F,eval=F}
+taxa_combined <- assignTaxonomy(seqtab_combined,
+        "C:/Users/Jacob/Desktop/Jacob_Uni/Data/SCN_vs_NICU_probiotic_study/Data/silva_nr99_v138_train_set.fa.gz")
+
+apply(taxa_combined, 2, function(col)sum(is.na(col))/length(col)) * 100
+```
+
+# Preprocessing: Creating a Phyloseq Object.
+
+## About.
+Creating a [phyloseq](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0061217) object to be used for analysis, and create different objects to be used for different types of analysis downstream.
+
+## Load required packages. 
+
+```{r, warning=F, message=F, results='hide'}
+sapply(c("caret", "pls", "e1071", "ggplot2", 
+    "randomForest", "tidyverse", "ggrepel", "nlme", "devtools", 
+    "reshape2", "PMA", "structSSI", "ade4","ggnetwork", 
+    "intergraph", "scales", "readxl", "genefilter", "impute", 
+    "phyloseq", "phangorn", "dada2", "DECIPHER", "gridExtra", "stringi", "janitor"), 
+    require, character.only = TRUE)
+```
+
+## Import metadata.
+
+```{r, warning=F, message=F, eval=F}
+# Chp3
+metadata_combined <- readxl::read_excel("data/metadata/Metadata.xlsx") %>% 
+  filter(ID != "NO SAMPLE", Study != "BLANK") %>% 
+  mutate(row_names = ID) %>% 
+  column_to_rownames("row_names") %>% 
+  mutate_if(is.character, as.factor) %>% 
+  mutate(Sample_Type = ifelse(OMNIgene_Number == "Original", "Original", "OMNIgene")) %>% 
+  rename_all(~str_remove(., "\\(NO=0 YES=1\\)")) %>%
+  rename_all(~str_remove(., "NO=0 YES=1")) %>%
+  rename_all(~str_remove(., "NO=0 AND YES=1")) %>%
+  rename_all(~str_remove_all(., "\\\r\\\n")) %>% 
+  rename_all(~str_trim(.)) %>%
+  dplyr::rename("Delivery" = "Mode of Delivery",
+         "Diet" = "Feeding Type (during admission)",
+         "Formula" = "Evern given formula",
+         "Primary_Group" = "NICU/SCN") %>% 
+  add_column(Type = "Post-discharge") %>% 
+  rename_all(~str_replace_all(., " ", "_")) %>% 
+  select("URN", "ID", "DOB", "NEC", "Sepsis", "Preeclampsia", "Chorioamnionitis", "Neonatal_Antibiotics", 
+         "Delivery", "Diet", "Gestational_Age_at_Birth", "ROP","Antenatal_Antibiotics", "Primary_Group", "Type") %>% 
+  rbind(
+    # Chp 1 and 2
+    readxl::read_excel("data/longitudinal_data/New_metadata.xlsx") %>% 
+      select(-c(3, 18, 21)) %>% 
+      add_column("Primary_Group" = "SCN", "Type" = "Discharge") %>%
+    rbind(
+      readxl::read_excel("data/longitudinal_data/Old_metadata.xlsx") %>% 
+        separate(DOB, into = c("DOB", "Time"), sep = "\\s") %>% 
+        mutate(DOB = as.Date(DOB)) %>% 
+        select(1, 3:4, 9, 17:18, 20:35)) %>% 
+      add_row(URN = "ZymoDNA1", ID = "ZymoDNA1", Type = "Control") %>% 
+      add_row(URN = "ZymoDNA2", ID = "ZymoDNA2", Type = "Control") %>% 
+      add_row(URN = "ZymoDNA4", ID = "ZymoDNA4", Type = "Control") %>% 
+      mutate(Sample_ID = ID) %>% 
+      column_to_rownames("Sample_ID") %>% 
+      mutate(Mode_of_Delivery = str_replace(Mode_of_Delivery, "Ceaserean", "Cesarean")) %>%
+      mutate(Batch = 1:nrow(.)) %>% 
+      mutate(Batch = if_else(Batch <= 20, "Run2", "Run1")) %>% 
+      mutate(Days_since_birth = as.numeric(difftime(.$Date_Collected, .$DOB, units = "days"))) %>% 
+      mutate(Gest_at_collection = Days_since_birth + Gestational_Age_at_Birth) %>%
+      dplyr::rename("Delivery" = "Mode_of_Delivery", "Diet" = "Feeding_Type") %>% 
+      select("URN", "ID", "DOB", "NEC", "Sepsis", "Preeclampsia", "Chorioamnionitis", "Neonatal_Antibiotics", 
+             "Delivery", "Diet","Gestational_Age_at_Birth", "ROP","Antenatal_Antibiotics", "Primary_Group", "Type")
+    ) 
+
+metadata_combined <- metadata_combined %>% 
+  mutate_if(is.factor, as.character) %>% 
+  mutate(Delivery = ifelse(Delivery == "SVB", "Vaginal", Delivery)) %>% 
+  mutate(Delivery = ifelse(Delivery == "Caesarian Section" | Delivery == "Cesarean" | Delivery == "caesarian Section" , "Caesarian", Delivery)) %>%
+  mutate(Diet = ifelse(Diet == "Breastfeeding", "Breastmilk", Diet)) %>% 
+  mutate(Diet = ifelse(Diet != "Breastmilk" & Diet != "Formula", "Combination", Diet)) %>% 
+  mutate_all(~ifelse(. == "0", "No", .)) %>% 
+  mutate_all(~ifelse(. == "1", "Yes", .)) %>% 
+  mutate(Sepsis = ifelse(grepl("Suspect", Sepsis), "No", Sepsis)) %>% 
+  mutate_if(is.character, as.factor) %>% 
+  add_column(Batch = ifelse(grepl("^3", .$ID), "1", "2")) %>% 
+  mutate(Batch = as.factor(Batch))
+```
+
+## Constrcut the Phyloseq object and subset to desired dataset
+ - Includes: metadata, ASV table, taxonomy table and phylogenetic tree.
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+ps_combined <- phyloseq(otu_table(seqtab_combined, taxa_are_rows=FALSE), 
+               sample_data(metadata_combined), 
+               tax_table(taxa_combined))
+
+ps_combined <- subset_samples(ps_combined, URN == "866123" | URN == "866124" | URN == "869019" | URN == "870173" | URN == "870223" | URN == "870224" ) %>% 
+  subset_samples(ID != "131")
+
+sample_data(ps_combined) <- ps_combined %>% 
+  sample_data() %>% 
+  unclass() %>% 
+  as.data.frame() %>% 
+  mutate(URN = ifelse(URN == "866123", "1", URN),
+         URN = ifelse(URN == "866124", "2", URN),
+         URN = ifelse(URN == "869019", "3", URN),
+         URN = ifelse(URN == "870173", "4", URN),
+         URN = ifelse(URN == "870223", "5", URN),
+         URN = ifelse(URN == "870224", "6", URN)) %>% 
+  mutate(URN = as.factor(URN), sample = ID) %>% 
+  column_to_rownames('sample') 
+```
+     
+
+## Getting read counts
+```{r, eval=F}
+sample_data(ps) %>% 
+  unclass() %>% 
+  as.data.frame() %>% 
+  mutate(TotalReads = sample_sums(ps)) %>% 
+  ggplot(aes(TotalReads)) + 
+    geom_histogram() + 
+    ggtitle("Sequencing Depth")
+```
+
+## Filtering and normalisation.
+
+### Taxonomy filtering.
+ - Can check the number of phyla before and after transformation with `table(tax_table(ps)[, "Phylum"], exclude = NULL)`.
+ - Remove features with ambiguous and NA phylum annotation.
+
+```{r, warning=F, message=F, results='hide', eval=F}
+ps1_combined <- subset_taxa(ps_combined, !is.na(Phylum) & !Phylum %in% c("", "uncharacterized"))
+```
+
+#### Check percentages of NA values left.
+```{r,warning=F,message=F}
+# Total
+sum(is.na(tax_table(ps1_combined)))/prod(dim(tax_table(ps1_combined))) * 100
+```
+
+```{r,warning=F,message=F}
+# Per taxonomic rank
+apply(tax_table(ps1_combined), 2, function(col)sum(is.na(col))/length(col)) * 100
+```
+
+### Filtering.
+ - Using an unsupervised method (relying on the data in this experiment) explore the prevelance of features in the dataset.
+ - Calculate the prevalence of each feature and store as a dataframe.
+ - Add taxonomy and total read counts.
+ - Compare prevelance and abundance filtering before deciding on the optimal method.
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+prevdf = apply(X = otu_table(ps1_combined),
+               MARGIN = ifelse(taxa_are_rows(ps1_combined), yes = 1, no = 2),
+               FUN = function(x){sum(x > 0)})
+
+prevdf = data.frame(Prevalence = prevdf,
+                    TotalAbundance = taxa_sums(ps1_combined),
+                    tax_table(ps1_combined))
+```
+
+ - Plot the relationship between prevelance and total read count for each feature. This provides information on outliers and ranges of features.
+ 
+```{r, warning=F, message=F, fig.cap="Scatterplot exploring the relationship between prevelance and abundance of phyla."}
+prevdf %>%
+  subset(Phylum %in% get_taxa_unique(ps1_combined, "Phylum")) %>%
+  ggplot(aes(TotalAbundance, Prevalence / nsamples(ps1_Combined),color=Phylum)) +
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 1) +  
+  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  
+  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme(legend.position="none")
+```
+ 
+ - Define abundance threshold
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+prevalenceThreshold = prevdf %>% 
+  summarise(sum(TotalAbundance)*.00001) %>% 
+  pull(1)
+
+keepTaxa = prevdf %>% 
+  filter(TotalAbundance >= prevalenceThreshold) %>% 
+  rownames()
+
+ps2_combined = prune_taxa(keepTaxa, ps1_combined)
+
+as.data.frame(keepTaxa) %>%  nrow()
+```
+
+ - Explore the relationship on the filtered data set.
+```{r, warning=F, message=F, fig.cap="Scatterplot exploring the relationship between prevelance and abundance of phyla on data passed through a prevalence threshold."}
+prevdf %>%
+  subset(Phylum %in% get_taxa_unique(ps2_combined, "Phylum")) %>%
+  ggplot(aes(TotalAbundance, Prevalence / nsamples(ps2_combined),color=Phylum)) +
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 1) +  
+  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  
+  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme(legend.position="none")
+```
+
+#### Check percentages of NA values left.
+```{r,warning=F,message=F}
+# Per taxonomic rank
+apply(tax_table(ps2_combined), 2, function(col)sum(is.na(col))/length(col)) * 100
+```
+
+### Aggolmerate taxa.
+ - Combine features that descend from the same genus as most species have not been identified due to the poor taxonomic depth in 16S, a result of the length of the fragment amplified from the 16SrRNA gene.  
+ - Can check how many genera would be present after filtering by running `length(get_taxa_unique(ps2_combined, taxonomic.rank = "Genus"))` and/or `ntaxa(ps3_combined)` will give the number of post agglomeration taxa.
+ 
+```{r, warning=F, message=F, results='hide', eval=F}
+ps3_combined = tax_glom(ps2_combined, "Genus", NArm = FALSE) 
+```
+
+#### Check percentages of NA values left.
+```{r,warning=F,message=F}
+# Per taxonomic rank
+apply(tax_table(ps3_combined), 2, function(col)sum(is.na(col))/length(col)) * 100 
+```
+
+### Normalisation.
+ - Plot a refraction curve to see if total sum scaling will surfice.
+ - Define colours and lines.
+ - Step = step size for sample sizes in rarefaction curve.
+ 
+```{r, warning=F, message=F, eval=F}
+vegan::rarecurve(t(otu_table(ps3_combined)), step = 20, label = FALSE, main = "Rarefaction Curve", 
+        col = c("black", "darkred", "forestgreen", "orange", "blue", "yellow", "hotpink"))
+```
+
+ - Perform total sum scaling on agglomerated dataset.
+ 
+```{r, warning=F, message=F, eval=F}
+ps4_combined <- transform_sample_counts(ps3_combined, function(x) x / sum(x))
+```
+
+
+# Data exploration and univariate analysis.
+
+
+## About
+
+
+
+## Load required packages. 
+
+```{r, warning=F, message=F, results='hide'}
+sapply(c("BiocManager", "ggplot2", "ggforce", "vegan", "knitr", "dplyr", 
+         "phyloseq", "phyloseqGraphTest", "igraph", "ggnetwork", "nlme", 
+         "reshape2", "tidyverse", "plyr", "DESeq2", "sjPlot", "ggpubr", 
+         "gridExtra", "grid", "gtable", "lazyeval", "phyloseq", "tidyverse", 
+         "knitr", "lme4", "emmeans", "MuMIn", "aods3", "sjPlot", "car"), 
+       require, character.only = TRUE)
+```
+
+## Beta diversity
+ - Use distance and ordination methods to explore the relationship between metadata.
+ - We calculate the distances using pruned, transformed (TSS) and non-agglomerated data.
+
+```{r, warning=F, message=F, eval=F}
+ps2_combined <- ps2_combined %>%
+        transform_sample_counts(function(x) x / sum(x))
+```
+ 
+ - We can then create distance matrices and plots for this data subset using several methods:
+ - e.g. bray-curtis or weighted unifrac distances with PCoA, NMDS, etc.
+ - Define a function that ordindates the previously transformed data, extarcts the eigenvalues, and creates a dissimilarity plot.
+ - Extract eigenvalues from ordination.
+
+```{r, fig.cap="PCoA plot of Bray-Curtis distances coloured by date.", warning=F, message=F}
+ordination_plots <- function(filtered_ps, variable, vis_method, dist_method){
+# ordinate
+ps_ordination <- ordinate(filtered_ps, method = vis_method, distance = dist_method)
+# get eignenvalues
+evals <- ps_ordination$values$Eigenvalues
+# generate plot
+plot_ordination(filtered_ps, ps_ordination, color = variable, 
+  title = "") +
+  labs(col = variable) +
+  coord_fixed(sqrt(evals[2] / evals[1])) +
+  geom_point(aes(label = ID, shape = URN), size = 5) +
+  geom_text(aes(label = ifelse(ID == 319, as.character(Sample_Type), '')), hjust = 0, vjust = 2) +
+  scale_color_manual(values = c("#440154FF", "#39568CFF", "#55C667FF")) +
+  guides(shape=guide_legend("URN"))
+ }
+
+ordination_plots(ps2_combined, "Type", "PCoA", "bray")
+
+#ggsave("outputs/PCoA.png", dpi = 600, height = 5, width = 7)
+```
+
+#### Export
+```{r}
+PCoA <- ordination_plots(ps2_combined, "Type", "PCoA", "bray")
+ggsave("outputs/longitudinal/PCoA.png", dpi = 600, height = 5, width = 6, PCoA)
+```
+
+### Statistical test: PERMANOVA.
+ - ps2_combined transformed.
+ - Preforming permutational anova for group-level differences based on dissimilarity.
+ - Extract otu table and metadata from phyloseq object.
+ - Use `adonis()` from the *vegan* package to perform the PERMANOVA.
+ - Homogeneity Condition
+  - Significant PERMANOVA means one of three things:
+  - there is a difference in the location of the samples (i.e. the average community composition).
+  - there is a difference in the dispersion of the samples (i.e. the variability in the community composition).
+  - there is a difference in both the location and the dispersion.
+  - If you get a significant PERMANOVA you'll want to distinguish between the three options by checking the homogeneity condition using `permdisp()`. If you get a non-significant result the first option above is correct.
+  - `betadisper()` gives a measure of the dispersion within groups. Thus, if the PERMANOVA test is significant and the permdisp is not, the significant result in your communities is due to a mean shift in community composition and not from increased variance within groups.
+
+
+```{r, warning=F, message=F}
+# permanova
+ps_otu <- data.frame(otu_table(ps2_combined))
+ps_metadata <- data.frame(sample_data(ps2_combined))
+permanova <- adonis2(ps_otu ~Type + Diet, data = ps_metadata, method = "bray", by = "margin") # adnois 2
+permanova 
+```
+
+#### Export
+```{r, warning=F, message=F, eval=F}
+permanova_func <- function(ps2_combined){
+  
+# permanova
+ps_otu <- data.frame(otu_table(ps2_combined))
+ps_metadata <- data.frame(sample_data(ps2_combined))
+permanova <- adonis2(ps_otu ~Type + Diet, data = ps_metadata, method = "bray", by = "margin") # adnois 2
+permanova <- permanova %>% 
+  as.data.frame() %>% 
+  mutate_at(c(2:5), ~round(., digits = 2)) %>% 
+  tableGrob() %>% 
+  annotate_figure(fig.lab = "PERMANOVA", fig.lab.face = "bold", fig.lab.size = 15)
+
+# homogeneity condition
+dist <- vegdist(ps_otu)
+homogeneity <- as.data.frame(anova(betadisper(dist, ps_metadata$Type))) %>% 
+  mutate_at(c(2:5), ~round(., digits = 2)) %>% 
+  tableGrob() %>% 
+  annotate_figure(fig.lab = "Homogeneity Condition", fig.lab.face = "bold", fig.lab.size = 15)
+
+# combine ouputs in a grid
+grid.arrange(permanova, homogeneity, ncol = 1)
+
+}
+
+permanova_table <- permanova_func(ps2_combined)
+
+ggsave("outputs/longitudinal/permanova.png", dpi = 600, height = 5, width = 5, permanova_table)
+```
+
+#### Statisitcal test: envfit
+
+```{r,warning=F,message=F,eval=F}
+ordination_distance <- ordinate(
+    physeq = ps2_combined, 
+    method = "NMDS",
+    distance = "bray",
+    formula = ~Type + Diet)
+
+envdat.phy <- ps2_combined %>% 
+  sample_data() %>%
+  unclass() %>% 
+  as.data.frame() %>% 
+  select(Type, Diet) 
+
+set.seed(1)
+
+envfit_object <- envfit(ordination_distance, envdat.phy, permutations = 10000) 
+``` 
+
+# Adjust p values
+
+```{r,warning=F,message=F,eval=F}
+p.adjust.envfit <- function (x, method = 'bonferroni', n){
+  x.new <- x
+  if (!is.null (x$vectors)) pval.vectors <- x$vectors$pvals else pval.vectors <- NULL
+  if (!is.null (x$factors)) pval.factors <- x$factors$pvals else pval.factors <- NULL
+  if (missing (n)) n <- length (pval.vectors) + length (pval.factors)
+  if (!is.null (x$vectors)) x.new$vectors$pvals <- p.adjust (x$vectors$pvals, 
+                                                             method = method, n = n)
+  if (!is.null (x$factors)) x.new$factors$pvals <- p.adjust (x$factors$pvals, 
+                                                             method = method, n = n)
+  cat ('Adjustment of significance by', method, 'method')
+  return (x.new)
+}
+
+set.seed(1)
+
+envfit_object <- envfit(ordination_distance, envdat.phy, permutations = 10000) %>% 
+  p.adjust.envfit(., method = "BH")
+
+envfit_object$factors 
+```
+
+# Differential abundance
+
+## Taxanomic distribution.
+
+### Bar charts
+ - Use `plot_bar_auto()` function wrapped around phyloseq's `plot_bar()` to explore the distribution of taxa at the genus and phylum levels.
+ - Subset transformed data (relative abundance) to only the top20 taxa.
+ 
+```{r, warning=F, message=F}
+top20 <- names(sort(taxa_sums(ps4_combined), decreasing=TRUE))[1:30]
+ps.top20 <- prune_taxa(top20, ps4_combined)
+
+plot_bar_auto <- function(ps, taxonomy){
+plot_bar(ps, fill = taxonomy) + 
+    geom_bar(aes(fill = taxonomy), stat="identity", position="stack") +
+    facet_wrap(~Type, scales = "free_x") + 
+    labs(title = paste0("Level:", taxonomy), y = "Abundance") + 
+    theme(legend.position = "bottom", legend.title = element_blank(), 
+    axis.title.x = element_blank(), axis.text.x = element_blank(), 
+    axis.ticks = element_blank()) +
+    scale_fill_viridis_d()  
+}
+
+grid.arrange(plot_bar_auto(ps.top20, "Phylum"),
+             plot_bar_auto(ps.top20, "Genus"),
+             nrow = 2, heights = c(1, 1.2))
+```
+
+#### Export Plot
+```{r,warning=F,message=F,eval=F}
+
+plot_bar_auto <- function(ps, taxonomy){
+plot_bar(ps, fill = taxonomy) + 
+    geom_bar(aes(fill = Phylum), stat="identity", position="stack") +
+    facet_wrap(~Type, scales = "free_x") + 
+    labs(title = paste0("Level:", taxonomy), y = "Abundance") + 
+    theme(legend.position = "bottom", legend.title = element_blank(), 
+    axis.title.x = element_blank(), axis.text.x = element_blank(), 
+    axis.ticks = element_blank()) +
+    scale_fill_viridis_d()  
+}
+
+Phylum_bar <- plot_bar_auto(ps.top20, "Phylum")
+
+plot_bar_auto <- function(ps, taxonomy){
+plot_bar(ps, fill = taxonomy) + 
+    geom_bar(aes(fill = Genus), stat="identity", position="stack") +
+    facet_wrap(~Type, scales = "free_x") + 
+    labs(title = paste0("Level:", taxonomy), y = "Abundance") + 
+    theme(legend.position = "bottom", legend.title = element_blank(), 
+    axis.title.x = element_blank(), axis.text.x = element_blank(), 
+    axis.ticks = element_blank()) +
+    scale_fill_viridis_d()  
+}
+
+Genus_bar <-plot_bar_auto(ps.top20, "Genus")
+
+grid.arrange(Phylum_bar,
+             Genus_bar,
+             nrow = 2, heights = c(1, 1.2))
+
+grid_plot <- grid.arrange(Phylum_bar,
+             Genus_bar,
+             nrow = 2, heights = c(1, 1.2))
+
+ggsave("outputs/longitudinal/taxonomy_plot.png", dpi = 600, height = 10, width = 12, grid_plot)
+```
+
+
+### Probiotic taxa
+
+```{r, warning=F, message=F}
+top20 <- names(sort(taxa_sums(ps4_combined), decreasing=TRUE))[1:30]
+ps.top20 <- prune_taxa(top20, ps4_combined)
+
+plot_bar_auto <- function(ps, taxonomy){
+plot_bar(ps, fill = taxonomy) + 
+    facet_wrap(~Type, scales = "free_x") + 
+    theme(legend.position = "top", legend.title = element_blank(), 
+    axis.title.x = element_blank(), axis.text.x = element_blank(), 
+    axis.ticks = element_blank()) 
+}
+
+grid_plot <- grid.arrange(ps.top20 %>% 
+                            subset_taxa(Genus == "Bifidobacterium") %>% 
+                            plot_bar_auto("Genus") + scale_fill_manual(values = "#440154FF"),
+                          ps.top20 %>% 
+                            subset_taxa(Genus == "Lactobacillus") %>% 
+                            plot_bar_auto("Genus") + scale_fill_manual(values = "#39568CFF"))
+
+ggsave("outputs/longitudinal/probiotic_taxa_plot.png", dpi = 600, height = 10, width = 12, grid_plot)
+```
+
+
+## Perform DESeq2 analysis
+
+```{r, warning=F, message=F}
+ps2_combined = prune_taxa(keepTaxa, ps1_combined)
+```
+
+ - Define function for calculating geometric means and estimating size factors.
+ - Define function to filter out taxa with small counts and low occurance. *count* and *samples* arguments need to be applied as numerical values.
+ 
+```{r, warning=F, message=F}
+calc_geo_means <- function(deseq_object){
+# geometric mean
+  gm_mean = function(x, na.rm = TRUE){
+    exp(sum(log(x[x > 0]), na.rm = na.rm) / length(x))
+  }
+  geoMeans <- apply(counts(deseq_object), 1, gm_mean)
+# size factors
+  estimateSizeFactors(deseq_object, geoMeans = geoMeans) 
+}
+
+deseq_filter <- function(deseq_object, count, samples){ 
+  nc <- counts(deseq_object, normalized = TRUE)
+  filtered <- rowSums(nc >= count) >= samples 
+  deseq_object[filtered,]
+}
+```
+
+ - Define a function to extract the results.
+ - Convert from *phyloseq* to *deseq* object.
+ - Use prevviously defined functions to calculate geometric means and filter to the most abundant and frequent taxa.
+ - Use `Deseq()` to perform the normalisation and analysis.
+ - Extract the results using appropriate previosuly defined function.
+ 
+```{r, warning=F,message=F}
+# define function for Wald test
+get_deseq_res_cat <- function(desq_object, contrast_variable, level1, level2){
+  res = results(desq_object, contrast = c(contrast_variable, level1, level2))
+  res = res[order(res$padj, na.last = NA), ]
+  sigtab = res[(res$padj < 0.05), ] 
+  sigtab = cbind(as(sigtab, "data.frame"), 
+    as(tax_table(ps3_combined)[rownames(sigtab), ], "matrix"))
+  sigtab %>%
+  arrange(padj) %>%
+  select("log2FoldChange", "lfcSE", "padj", "Genus") %>%
+  add_column(Variable = paste0(contrast_variable, level1)) # label the base level
+}
+
+# define a function for an LRT test
+get_deseq_res_lrt <- function(deseq_object){
+  res = results(deseq_object)
+  res = res[order(res$padj, na.last = NA), ]
+  sigtab = res[(res$padj < 0.05), ] 
+  sigtab = cbind(as(sigtab, "data.frame"), 
+          as(tax_table(ps3_combined)[rownames(sigtab), ], "matrix"))
+  sigtab %>%
+  arrange(padj) %>%
+  select("log2FoldChange", "lfcSE", "padj", "Genus") 
+}
+
+
+# perform tests
+phyloseq_to_deseq2(ps3_combined, ~Type + Diet) %>% 
+  calc_geo_means() %>% 
+  deseq_filter(10, 8) %>% 
+  DESeq(fitType = "local", test = "LRT", reduced = ~ Diet) %>% 
+  get_deseq_res_lrt %>% 
+  remove_rownames() %>% 
+  knitr::kable()
+
+phyloseq_to_deseq2(ps3_combined, ~Type + Diet) %>% 
+  calc_geo_means() %>% 
+  deseq_filter(10, 8) %>% 
+  DESeq(fitType = "local", test = "Wald") %>% 
+  get_deseq_res_cat("Type", "Admission", "Discharge") %>% 
+  remove_rownames() %>% 
+  knitr::kable()
+
+phyloseq_to_deseq2(ps3_combined, ~Type + Diet) %>% 
+  calc_geo_means() %>% 
+  deseq_filter(10, 8) %>% 
+  DESeq(fitType = "local", test = "Wald") %>% 
+  get_deseq_res_cat("Type", "Admission", "Post-discharge") %>% 
+  remove_rownames() %>% 
+  knitr::kable()
+
+phyloseq_to_deseq2(ps3_combined, ~Type + Diet) %>% 
+  calc_geo_means() %>% 
+  deseq_filter(10, 8) %>% 
+  DESeq(fitType = "local", test = "Wald") %>% 
+  get_deseq_res_cat("Type", "Discharge", "Post-discharge") %>% 
+  remove_rownames() %>% 
+  knitr::kable()
+```
+
+# Diet
+```{r,warning=F,message=F}
+phyloseq_to_deseq2(ps3_combined, ~Type + Diet) %>% 
+  calc_geo_means() %>% 
+  deseq_filter(10, 8) %>% 
+  DESeq(fitType = "local", test = "LRT", reduced = ~ Type) %>% 
+  get_deseq_res_lrt %>% 
+  remove_rownames() %>% 
+  knitr::kable()
+
+phyloseq_to_deseq2(ps3_combined, ~Type + Diet) %>% 
+  calc_geo_means() %>% 
+  deseq_filter(10, 8) %>% 
+  DESeq(fitType = "local", test = "Wald") %>% 
+  get_deseq_res_cat("Diet", "Breastmilk", "Combination") %>% 
+  remove_rownames() %>% 
+  knitr::kable()
+```
+
+
+## Alpha diversity.
+ 
+```{r,warning=F,message=F}
+ps2_combined = prune_taxa(keepTaxa, ps1_combined)
+```
+
+
+```{r, warning=F, message=F, eval=F}
+calc_alpha_diversity <- function(ps2_combined){
+# calculate metrics
+ps_alpha_div <- ps2_combined %>%
+                estimate_richness(measures = c("Shannon", "Observed", "Chao1")) %>% 
+                select(-se.chao1)
+
+# creat ID column based on rownames
+ps_alpha_div <- rownames_to_column(ps_alpha_div, var = "ID") %>% 
+                mutate(ID = as.factor(gsub("X", "", ID)))
+
+# join alpha metrics with metadata by the ID column
+ps2_combined %>% 
+  sample_data() %>% 
+  unclass() %>% 
+  as.data.frame() %>% 
+  right_join(ps_alpha_div, by = "ID") %>%
+  as.data.frame() 
+}
+
+ps_metadata <- calc_alpha_diversity(ps2_combined)
+```
+
+### Distribution
+
+#### Histogram
+ 
+```{r, warning=F, message=F}
+# To determine if diveristy is normally distributed
+ggplot(ps_metadata, aes(x = Shannon)) + 
+  geom_histogram() + 
+  xlab("Alpha Diversity") + ylab("Count")
+```
+
+#### Test for normality.
+ 
+```{r, warning=F, message=F}
+shapiro.test(ps_metadata$Shannon)
+```
+
+### Plot 
+
+#### Point
+
+ - Use `plot_richness()` from *phyloseq*, which estimates alpha diversity metrics using *vegan* and plots them, taking standard *ggplot2* *geoms_* for the plot design.
+ - use ps2_combined non-transformed data for alpha.
+ 
+```{r, warning=F, message=F}
+plot_richness(ps2_combined, measures = c("Shannon", "Observed"), 
+              color = "Type", title = "") +
+    geom_point(size = 3.5, alpha = 0.7) +
+    theme(axis.text.x = element_blank(), 
+          axis.ticks.x = element_blank(), 
+          panel.border = element_rect(colour = "grey", fill = NA, size = 1))+
+  scale_color_viridis_d() +
+  xlab("Samples") +
+  ylab("Alpha Diversity") +
+  scale_color_manual(values = c("#440154FF", "#39568CFF", "#55C667FF")) +
+  xlab("Infant Samples")
+```
+#### Export plot
+```{r, warning=F, message=F}
+ggsave("outputs/longitudinal/aplha_plot.png", dpi = 600 , height = 6, width = 7)
+```
+
+### Fit Model - Shannon
+
+```{r,warning=F,message=F}
+global <- glm(Shannon ~ Type + Diet, data = ps_metadata) 
+
+global
+
+car::Anova(global) %>% 
+  as.data.frame(row.names = NULL)
+
+emmeans(global, list(pairwise ~ Type), adjust = "tukey") %>% 
+  pairs() %>% 
+  as.data.frame() 
+```
+
+```{r,warning=F,message=F,eval=F}
+gof(global)
+r.squaredGLMM(global)
+```
+
+### Fit Model - Observed
+
+```{r,warning=F,message=F}
+global <- glm(Observed ~ Type + Diet, data = ps_metadata) 
+
+global
+
+car::Anova(global) %>% 
+  as.data.frame(row.names = NULL)
+
+emmeans(global, list(pairwise ~ Type), adjust = "tukey") %>% 
+  pairs() %>% 
+  as.data.frame() 
+```
+
+```{r,warning=F,message=F,eval=F}
+gof(global)
+r.squaredGLMM(global)
+```
