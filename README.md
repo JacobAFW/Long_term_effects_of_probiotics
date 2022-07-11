@@ -12,7 +12,7 @@ Scripts: *Pipeline.Rmd* & *Sample_storage.Rmd*
 The DOI will be added when published.
 
 
-## Exploring the long-term colonisation and persistence of probiotic-prophylaxis species on the gut microbiome of preterm infants: a pilot study.
+## Exploring the long-term colonisation and persistence of probiotic-prophylaxis species on the gut microbiome of preterm infants: a pilot study (https://link.springer.com/article/10.1007/s00431-022-04548-y).
 
 This study aimed to observe the long-term impact of probiotic prophylaxis on preterm infants, and further explores the idea of expanding the current probiotic supplementation criteria for preterm infants in Australia. The most premature of infants suffer from a greater burden of necrotising enterocolitis (NEC) and in North Queensland, Australia, preterm babies born < 32 weeks are supplemented with probiotics to mitigate this risk. However, accumulating evidence suggests that the benefits of probiotic prophyalaxis may extend beyond mitigating NEC. Probiotics may contribute to positive microbial changes in the gut, contributing to greater immunity and health. If this is the case, then expanding the criteria for probitoic use beyond the most preterm may be warranted.
 
